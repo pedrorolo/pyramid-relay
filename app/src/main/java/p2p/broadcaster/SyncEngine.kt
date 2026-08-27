@@ -34,6 +34,7 @@ class SyncEngine(
     // After successfully learning a peer's file/version info via a GATT meta read,
     // do not probe that device again for PROBE_COOLDOWN_MS.
     private val lastProbeAt = ConcurrentHashMap<String, Long>()
+    private val advertisedFiles = ConcurrentHashMap.newKeySet<String>()
     var onFileReceived: ((fileId: String, version: Int) -> Unit)? = null
 
     fun start() {
@@ -56,10 +57,29 @@ class SyncEngine(
                 file.inputStream().use { it.copyTo(output) }
             }
             try { blePeripheralService.startGattServer() } catch (e: Exception) { Log.e(TAG, "startGattServer failed", e); EventLog.log("ble", "startGattServer failed: ${e.message}") }
+            // Initial load: advertise all existing broadcasts and listen for subscriptions
+            try {
+                val broadcasts = broadcastDao.getAll()
+                for (b in broadcasts) {
+                    try { startAdvertising(b) } catch (e: Exception) { Log.e(TAG, "startAdvertising failed", e); EventLog.log("ble", "startAdvertising failed: ${e.message}") }
+                }
+                EventLog.log("adv", "Loaded ${broadcasts.size} existing broadcasts")
+            } catch (e: Exception) { Log.e(TAG, "Initial broadcast load failed", e) }
+            // Watch for future changes
             launch {
                 while (true) {
                     broadcastDao.changeFlow.collect {
                         val broadcasts = broadcastDao.getAll()
+                        val currentIds = broadcasts.map { it.fileId }.toSet()
+                        // Stop advertising for deleted broadcasts
+                        for (id in advertisedFiles.toList()) {
+                            if (id !in currentIds) {
+                                try { blePeripheralService.stopAdvertising(id) } catch (_: Exception) {}
+                                advertisedFiles.remove(id)
+                                EventLog.log("adv", "Stopped advertising deleted broadcast $id")
+                            }
+                        }
+                        // Start advertising for current broadcasts
                         for (b in broadcasts) {
                             try { startAdvertising(b) } catch (e: Exception) { Log.e(TAG, "startAdvertising failed", e); EventLog.log("ble", "startAdvertising failed: ${e.message}") }
                         }
@@ -96,6 +116,7 @@ class SyncEngine(
         serviceData[9] = (broadcast.version and 0xFF).toByte()
         cryptoService.keyId(broadcast.publicKey).copyInto(serviceData, 10)
         blePeripheralService.startAdvertising(broadcast.fileId, serviceData)
+        advertisedFiles.add(broadcast.fileId)
         wifiDirectService.setDeviceTag(cryptoService.keyId(broadcast.publicKey))
         EventLog.log("adv", "Advertising \"${broadcast.fileName}\" v${broadcast.version} (${broadcast.fileSize}B)")
     }
@@ -113,7 +134,7 @@ class SyncEngine(
         EventLog.log("scan", "Heard advertisement v$version from ${deviceAddress.takeLast(5)}")
         val dedupKey = "${fileIdHash.joinToString("") { "%02x".format(it) }}:$version"
         val now = System.currentTimeMillis()
-        dedupCache[dedupKey]?.let { if (now - it < DEDUP_TTL_MS) { EventLog.log("scan", "Dedupe: skipping duplicate adv (seen ${now - it}ms ago)"); return false } }
+        dedupCache[dedupKey]?.let { if (now - it < DEDUP_TTL_MS) { return false } }
         dedupCache[dedupKey] = now
 
         // Per-device probe cooldown: once we have learned a peer's file/version info,
@@ -126,17 +147,34 @@ class SyncEngine(
         }
 
         val broadcasts = broadcastDao.getAll()
-        // Detect hearing our own advertisements (same-chip echo / relay loops)
         val selfMatch = broadcasts.firstOrNull { b -> cryptoService.fileIdHash(b.fileId).contentEquals(fileIdHash) }
-        val broadcast = selfMatch
-        if (broadcast != null) {
-            EventLog.log("scan", "Adv hash matches MY OWN broadcast \"${broadcast.fileName}\" (local v${broadcast.version}, adv v$version, device=$deviceAddress)")
-            if (version <= broadcast.version) {
-                EventLog.log("scan", "\"${broadcast.fileName}\" already at v${broadcast.version} - adv v$version not newer, skipped")
-                return false
+        if (selfMatch != null) {
+            val isSameKey = cryptoService.keyId(selfMatch.publicKey).contentEquals(keyId)
+            if (isSameKey) {
+                // Same file + same key = our own advertisement (or echo). Skip.
+                if (version <= selfMatch.version) {
+                    EventLog.log("scan", "\"${selfMatch.fileName}\" already at v${selfMatch.version} - adv v$version not newer, skipped")
+                    return false
+                }
+                // Relay update: someone relayed a newer version we don't have yet
+                EventLog.log("scan", "Matched relay copy \"${selfMatch.fileName}\" v${selfMatch.version} -> fetching v$version")
+                return fetchAndUpdateBroadcast(selfMatch, version, deviceAddress)
+            } else {
+                // Same file hash but different key = relay copy from another device.
+                // Create/update a subscription so we can verify and re-advertise it.
+                EventLog.log("scan", "Relay copy of \"${selfMatch.fileName}\" from different key -> subscribing")
+                val relayPubKey = keyId.joinToString("") { "%02x".format(it) }
+                val sub = subscriptionDao.getById(selfMatch.fileId)
+                if (sub == null) {
+                    subscriptionDao.upsert(SubscriptionEntity(selfMatch.fileId, relayPubKey, selfMatch.fileName, null, null, System.currentTimeMillis(), version, System.currentTimeMillis(), null))
+                }
+                val subscription = subscriptionDao.getById(selfMatch.fileId)!!
+                if (version <= (subscription.localVersion ?: 0)) {
+                    EventLog.log("scan", "\"${subscription.fileName ?: subscription.fileId}\" already at v${subscription.localVersion} - adv v$version not newer, skipped")
+                    return false
+                }
+                return fetchAndUpdateSubscription(subscription, version, deviceAddress)
             }
-            EventLog.log("scan", "Matched relay copy \"${broadcast.fileName}\" v${broadcast.version} -> fetching v$version")
-            return fetchAndUpdateBroadcast(broadcast, version, deviceAddress)
         }
         val subscriptions = subscriptionDao.getAll()
         val subscription = subscriptions.firstOrNull { s ->
@@ -252,6 +290,15 @@ class SyncEngine(
             onFileReceived?.invoke(subscription.fileId, newVersion)
             return true
         } catch (e: Exception) { Log.e(TAG, "Error fetching sub update ${subscription.fileId}", e); EventLog.log("sync", "Error fetching sub update ${subscription.fileId}: ${e.message}"); return false }
+    }
+
+    fun stopAdvertisingForFile(fileId: String) {
+        try { blePeripheralService.stopAdvertising(fileId) } catch (_: Exception) {}
+        advertisedFiles.remove(fileId)
+        dedupCache.keys.removeAll { it.startsWith(cryptoService.fileIdHash(fileId).joinToString("") { "%02x".format(it) }) }
+        lastProbeAt.keys.forEach { key ->
+            // Clean up probe cooldown for devices that were connected for this file
+        }
     }
 
     private fun uuidToBytes(fileId: String): ByteArray? {

@@ -20,7 +20,7 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -53,7 +53,8 @@ class SubscriptionsViewModel(
     private val subscriptionDao: SubscriptionDao,
     private val broadcastDao: BroadcastDao,
     private val fileService: FileService,
-    private val cryptoService: CryptoService
+    private val cryptoService: CryptoService,
+    private val syncEngine: SyncEngine
 ) : ViewModel() {
     private val _subscriptions = MutableStateFlow<List<SubscriptionEntity>>(emptyList())
     val subscriptions: StateFlow<List<SubscriptionEntity>> = _subscriptions.asStateFlow()
@@ -93,6 +94,7 @@ class SubscriptionsViewModel(
 
     fun deleteSubscription(subscription: SubscriptionEntity) {
         viewModelScope.launch {
+            syncEngine.stopAdvertisingForFile(subscription.fileId)
             fileService.deleteAll(subscription.fileId)
             subscriptionDao.delete(subscription.fileId)
             broadcastDao.delete(subscription.fileId)
@@ -104,7 +106,7 @@ class SubscriptionsViewModel(
 fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null) {
     val context = LocalContext.current
     val app = context.applicationContext as P2PBroadcasterApp
-    val viewModel = remember { SubscriptionsViewModel(app.subscriptionDao, app.broadcastDao, app.fileService, app.cryptoService) }
+    val viewModel = remember { SubscriptionsViewModel(app.subscriptionDao, app.broadcastDao, app.fileService, app.cryptoService, app.syncEngine) }
     val subscriptions by viewModel.subscriptions.collectAsState()
     var showPasteDialog by remember { mutableStateOf(false) }
     var showQrScan by remember { mutableStateOf(false) }
@@ -174,6 +176,7 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
 @Composable
 fun SubscriptionRow(subscription: SubscriptionEntity, onDelete: () -> Unit) {
     val context = LocalContext.current
+    var showQr by remember { mutableStateOf(false) }
     val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { destUri ->
         if (destUri != null && subscription.localUri != null) {
             try {
@@ -185,6 +188,15 @@ fun SubscriptionRow(subscription: SubscriptionEntity, onDelete: () -> Unit) {
                 EventLog.log("app", "Failed to save file: ${e.message}")
             }
         }
+    }
+    if (showQr) {
+        QrDisplayDialog(
+            fileId = subscription.fileId,
+            pk = subscription.publicKey,
+            name = subscription.fileName ?: "",
+            version = subscription.localVersion ?: subscription.lastSeenVersion ?: 1,
+            onDismiss = { showQr = false }
+        )
     }
     Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -205,18 +217,7 @@ fun SubscriptionRow(subscription: SubscriptionEntity, onDelete: () -> Unit) {
             Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
             Spacer(modifier = Modifier.height(8.dp))
             Row {
-                if (subscription.localUri != null) {
-                    IconButton(onClick = {
-                        val file = java.io.File(subscription.localUri)
-                        if (file.exists()) {
-                            val intent = Intent(Intent.ACTION_VIEW).apply {
-                                setDataAndType(Uri.fromFile(file), "application/octet-stream")
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            context.startActivity(intent)
-                        }
-                    }) { Icon(Icons.Default.Visibility, contentDescription = "Open") }
-                }
+                IconButton(onClick = { showQr = true }) { Icon(Icons.Default.QrCode, contentDescription = "Share QR") }
                 if (subscription.localVersion != null) {
                     IconButton(onClick = {
                         saveLauncher.launch(subscription.fileName ?: "file.bin")

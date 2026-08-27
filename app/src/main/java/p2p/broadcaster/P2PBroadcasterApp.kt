@@ -29,7 +29,7 @@ class P2PBroadcasterApp : Application() {
         database = AppDatabase(this)
         broadcastDao = BroadcastDao(database)
         subscriptionDao = SubscriptionDao(database)
-        cryptoService = CryptoService()
+        cryptoService = CryptoService(this)
         fileService = FileService(this)
         notificationService = NotificationService(this)
         bleCentralService = BleCentralService(this)

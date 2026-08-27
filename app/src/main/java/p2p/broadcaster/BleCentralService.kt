@@ -64,7 +64,6 @@ class BleCentralService(private val context: Context) {
                     }
                     return
                 }
-                EventLog.log("ble", "Listening: heard device ${result.device.address.takeLast(5)} advertising our service")
                 scope.launch { onDeviceDiscovered?.invoke(result.device.address, data) }
             }
             override fun onScanFailed(errorCode: Int) {

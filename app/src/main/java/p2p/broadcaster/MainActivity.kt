@@ -18,15 +18,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.filled.BroadcastOnHome
 import androidx.compose.material.icons.filled.Subscriptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -43,7 +46,18 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
+        private val REQUIRED_PERMISSION_NAMES = mapOf(
+            Manifest.permission.ACCESS_FINE_LOCATION to "Location",
+            Manifest.permission.BLUETOOTH_SCAN to "Bluetooth Scan",
+            Manifest.permission.BLUETOOTH_CONNECT to "Bluetooth Connect",
+            Manifest.permission.BLUETOOTH_ADVERTISE to "Bluetooth Advertise",
+            Manifest.permission.POST_NOTIFICATIONS to "Notifications",
+            Manifest.permission.NEARBY_WIFI_DEVICES to "Nearby WiFi Devices"
+        )
     }
+
+    private var showMissingPermsDialog = mutableStateOf(false)
+    private var missingPermsMessage = mutableStateOf("")
 
     private val requiredPermissions: Array<String>
         get() {
@@ -62,8 +76,21 @@ class MainActivity : ComponentActivity() {
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
-            if (grants.all { it.value }) startSyncService()
+            val denied = grants.filter { !it.value }.keys
+            if (denied.isNotEmpty()) {
+                showPermissionError(denied.toList())
+            } else {
+                startSyncService()
+            }
         }
+
+    private fun showPermissionError(denied: List<String>) {
+        val names = denied.map { REQUIRED_PERMISSION_NAMES[it] ?: it }
+        missingPermsMessage.value = "The following permissions are required:\n\n${names.joinToString("\n") { "• $it" }}\n\nPlease grant them in Settings > Apps > P2P Broadcaster > Permissions, then reopen the app."
+        showMissingPermsDialog.value = true
+        EventLog.log("app", "Permissions denied: ${denied.joinToString(", ")}")
+        Log.w(TAG, "Permissions denied: $denied")
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,6 +98,18 @@ class MainActivity : ComponentActivity() {
         requestPermissionsAndStart()
         setContent {
             P2PBroadcasterTheme {
+                if (showMissingPermsDialog.value) {
+                    AlertDialog(
+                        onDismissRequest = { finishAffinity() },
+                        title = { Text("Missing Permissions") },
+                        text = { Text(missingPermsMessage.value) },
+                        confirmButton = {
+                            TextButton(onClick = { finishAffinity() }) {
+                                Text("OK")
+                            }
+                        }
+                    )
+                }
                 MainScreen(intent)
             }
         }

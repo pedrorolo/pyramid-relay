@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -46,7 +47,8 @@ import java.util.UUID
 class BroadcastsViewModel(
     private val broadcastDao: BroadcastDao,
     private val cryptoService: CryptoService,
-    private val fileService: FileService
+    private val fileService: FileService,
+    private val syncEngine: SyncEngine
 ) : ViewModel() {
     private val _broadcasts = MutableStateFlow<List<BroadcastEntity>>(emptyList())
     val broadcasts: StateFlow<List<BroadcastEntity>> = _broadcasts.asStateFlow()
@@ -94,8 +96,50 @@ class BroadcastsViewModel(
 
     fun deleteBroadcast(broadcast: BroadcastEntity) {
         viewModelScope.launch {
+            syncEngine.stopAdvertisingForFile(broadcast.fileId)
             fileService.deleteAll(broadcast.fileId)
             broadcastDao.delete(broadcast.fileId)
+        }
+    }
+
+    fun updateBroadcast(broadcast: BroadcastEntity, uri: Uri, context: android.content.Context) {
+        viewModelScope.launch {
+            EventLog.log("adv", "updateBroadcast: starting for \"${broadcast.fileName}\" (current v${broadcast.version})")
+            val alias = broadcast.privateKeyAlias
+            if (alias == null) {
+                EventLog.log("adv", "updateBroadcast: CANCELLED - no private key alias (relay broadcast)")
+                return@launch
+            }
+            EventLog.log("adv", "updateBroadcast: alias=$alias")
+            val newVersion = broadcast.version + 1
+            EventLog.log("adv", "updateBroadcast: new version will be v$newVersion")
+            val inputStream = context.contentResolver.openInputStream(uri) ?: run {
+                EventLog.log("adv", "updateBroadcast: CANCELLED - cannot open input stream")
+                return@launch
+            }
+            val fileBytes = inputStream.readBytes()
+            inputStream.close()
+            EventLog.log("adv", "updateBroadcast: read ${fileBytes.size} bytes from new file")
+            val vDir = fileService.getVersionDir(broadcast.fileId, newVersion); vDir.mkdirs()
+            val file = fileService.getFile(broadcast.fileId, newVersion); file.writeBytes(fileBytes)
+            EventLog.log("adv", "updateBroadcast: wrote file to ${file.absolutePath}")
+            val hashHex = cryptoService.sha256Hex(fileBytes)
+            val hashStr = Base64.getEncoder().encodeToString(cryptoService.sha256(fileBytes))
+            val msg = cryptoService.buildSignatureMessage(broadcast.fileId, newVersion, hashHex)
+            val privateKey = cryptoService.getPrivateKey(alias)
+            if (privateKey == null) {
+                EventLog.log("adv", "updateBroadcast: CANCELLED - private key not found for alias $alias")
+                return@launch
+            }
+            val signature = cryptoService.sign(msg, privateKey)
+            val signatureStr = Base64.getEncoder().encodeToString(signature)
+            EventLog.log("adv", "updateBroadcast: stopping old advertisement")
+            syncEngine.stopAdvertisingForFile(broadcast.fileId)
+            EventLog.log("adv", "updateBroadcast: updating DB version to v$newVersion")
+            broadcastDao.updateVersion(broadcast.fileId, newVersion, hashStr, signatureStr, file.absolutePath, fileBytes.size.toLong(), System.currentTimeMillis())
+            EventLog.log("adv", "updateBroadcast: DB updated, evicting old versions")
+            fileService.evictOldVersions(broadcast.fileId, newVersion)
+            EventLog.log("adv", "updateBroadcast: DONE - \"${broadcast.fileName}\" updated to v$newVersion")
         }
     }
 }
@@ -106,10 +150,17 @@ fun BroadcastsScreen(
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as P2PBroadcasterApp
-    val viewModel = remember { BroadcastsViewModel(app.broadcastDao, app.cryptoService, app.fileService) }
+    val viewModel = remember { BroadcastsViewModel(app.broadcastDao, app.cryptoService, app.fileService, app.syncEngine) }
     val broadcasts by viewModel.broadcasts.collectAsState()
     val pickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let { viewModel.importAndBroadcast(it, context) }
+    }
+    var updateTarget by remember { mutableStateOf<BroadcastEntity?>(null) }
+    val updateLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null && updateTarget != null) {
+            viewModel.updateBroadcast(updateTarget!!, uri, context)
+            updateTarget = null
+        }
     }
 
     Scaffold(
@@ -148,6 +199,10 @@ fun BroadcastsScreen(
                                     val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
                                     onShareQr(broadcast.fileId, pkUrl, broadcast.fileName, broadcast.version)
                                 }) { Icon(Icons.Default.QrCode, contentDescription = "Share QR") }
+                                IconButton(onClick = {
+                                    updateTarget = broadcast
+                                    updateLauncher.launch(arrayOf("*/*"))
+                                }) { Icon(Icons.Default.Refresh, contentDescription = "Update") }
                                 IconButton(onClick = { viewModel.deleteBroadcast(broadcast) }) {
                                     Icon(Icons.Default.Delete, contentDescription = "Delete")
                                 }
