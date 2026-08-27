@@ -1,0 +1,19 @@
+package p2p.broadcaster
+
+enum class Role { ORIGINATOR, RELAY }
+
+data class BroadcastEntity(
+    val fileId: String,
+    val fileName: String,
+    val mimeType: String,
+    val internalUri: String,
+    val fileHash: String,
+    val fileSize: Long,
+    val version: Int,
+    val publicKey: String,
+    val privateKeyAlias: String?,
+    val signature: String,
+    val role: Role,
+    val createdAt: Long,
+    val updatedAt: Long
+)
