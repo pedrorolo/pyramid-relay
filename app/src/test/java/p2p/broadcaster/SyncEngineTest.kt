@@ -182,6 +182,7 @@ class SyncEngineTest {
             Role.RELAY, 0L, 0L
         )
         coEvery { broadcastDao.getAll() } returns listOf(broadcast)
+        coEvery { subscriptionDao.getById(any()) } returns null
 
         val fileIdHash = cryptoService.fileIdHash(fileId)
         val keyId = cryptoService.keyId(pubKeyStr)
@@ -342,6 +343,7 @@ class SyncEngineTest {
             Role.ORIGINATOR, 0L, 0L
         )
         coEvery { broadcastDao.getAll() } returns listOf(broadcast)
+        coEvery { subscriptionDao.getById(any()) } returns null
 
         val fileIdHash = cryptoService.fileIdHash(fileId)
         val keyId = cryptoService.keyId(pubKeyStr)

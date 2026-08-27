@@ -166,8 +166,13 @@ class SyncEngine(
         if (selfMatch != null) {
             val isSameKey = cryptoService.keyId(selfMatch.publicKey).contentEquals(keyId)
             if (isSameKey) {
-                // Same file + same key = our own advertisement (or echo). Skip.
                 if (version <= selfMatch.version) {
+                    // Same file + same key + not newer: check if we have a subscription too.
+                    val sub = subscriptionDao.getById(selfMatch.fileId)
+                    if (sub != null && (sub.localVersion ?: 0) < version) {
+                        EventLog.log("scan", "\"${selfMatch.fileName}\" self-match but subscription needs v$version (local v${sub.localVersion})")
+                        return fetchAndUpdateSubscription(sub, version, deviceAddress)
+                    }
                     EventLog.log("scan", "\"${selfMatch.fileName}\" already at v${selfMatch.version} - adv v$version not newer, skipped")
                     return false
                 }

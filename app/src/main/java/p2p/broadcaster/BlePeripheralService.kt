@@ -17,6 +17,7 @@ import android.content.Context
 import android.os.ParcelUuid
 import android.util.Log
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 import p2p.broadcaster.EventLog
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
@@ -34,12 +35,15 @@ class BlePeripheralService(private val context: Context) {
     private val adapter get() = bluetoothManager.adapter
     private var gattServer: BluetoothGattServer? = null
     private var advertiser: BluetoothLeAdvertiser? = null
-    // One independent advertiser per broadcast: a legacy 31B packet holds exactly
-    // one service-data entry, so files can never share a single advertisement.
-    private val activeAdvertisements = java.util.concurrent.ConcurrentHashMap<String, AdvertiseCallback>()
-    // The fileId whose meta the single META characteristic serves. The GATT server
-    // has one fixed META char (152B), so it can only serve one file's meta; track the
-    // most recently advertised file. (Most deployments broadcast one file at a time.)
+    // Single BLE advertising set that rotates through files every ~3s.
+    // Samsung stacks silently break when many concurrent advertising sets are used;
+    // one rotating set avoids the issue entirely.
+    private val advertisingFiles = CopyOnWriteArrayList<Pair<String, ByteArray>>() // (fileId, serviceData)
+    @Volatile private var currentAdIndex = 0
+    @Volatile private var rotationRunning = false
+    private var rotationThread: Thread? = null
+    private var currentAdCallback: AdvertiseCallback? = null
+    // The fileId whose meta the single META characteristic serves.
     private var servicedFileId: String? = null
     // Maps 6-byte fileIdHash hex -> fileId so the central can SELECT which file to serve.
     private val fileHashToFileId = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -210,57 +214,108 @@ class BlePeripheralService(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun startAdvertising(fileId: String, serviceData: ByteArray) {
-        if (activeAdvertisements.containsKey(fileId)) return
+        // Already tracking this file — skip (idempotent).
+        if (advertisingFiles.any { it.first == fileId }) return
         val adv = adapter?.bluetoothLeAdvertiser ?: run {
             EventLog.log("ble", "BLE advertiser not available")
             return
         }
         advertiser = adv
+        advertisingFiles.add(fileId to serviceData)
+        // Track fileIdHash -> fileId so SELECT works.
+        val hashHex = serviceData.copyOfRange(0, 6).joinToString("") { "%02x".format(it) }
+        fileHashToFileId[hashHex] = fileId
+        EventLog.log("ble", "Advertising queued: $fileId (total=${advertisingFiles.size})")
+        if (advertisingFiles.size == 1) {
+            servicedFileId = fileId
+            startAdWithCurrentFile()
+        }
+        startRotationIfNeeded()
+    }
+
+    /** Start or restart the single BLE advertising set with the current file. */
+    @SuppressLint("MissingPermission")
+    private fun startAdWithCurrentFile() {
+        if (advertisingFiles.isEmpty()) return
+        val adv = advertiser ?: return
+        // Stop any existing ad first.
+        currentAdCallback?.let { try { adv.stopAdvertising(it) } catch (_: Exception) {} }
+        val (fileId, serviceData) = advertisingFiles[currentAdIndex % advertisingFiles.size]
         servicedFileId = fileId
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setConnectable(true).setTimeout(0)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH).build()
-        // 21B on the wire: 3B flags + 18B service-data AD structure
-        // (2B len/type + 2B UUID16 + 14B payload).
         val data = AdvertiseData.Builder()
             .setIncludeDeviceName(false).setIncludeTxPowerLevel(false)
             .addServiceData(ParcelUuid(SERVICE_UUID), serviceData)
             .build()
         val callback = object : AdvertiseCallback() {
-            override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) { Log.d(TAG, "Advertising started for $fileId") }
+            override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
+                Log.d(TAG, "Advertising: ${fileId.takeLast(8)} v${serviceData[6].toInt() and 0xFF}")
+            }
             override fun onStartFailure(errorCode: Int) {
                 Log.e(TAG, "Advertising failed: $errorCode")
                 EventLog.log("ble", "Advertising start failed: $errorCode")
             }
         }
-        activeAdvertisements[fileId] = callback
-        // Track fileIdHash -> fileId so SELECT works.
-        val hashHex = serviceData.copyOfRange(0, 6).joinToString("") { "%02x".format(it) }
-        fileHashToFileId[hashHex] = fileId
+        currentAdCallback = callback
         try { adv.startAdvertising(settings, data, callback) } catch (e: Exception) {
-            activeAdvertisements.remove(fileId)
-            fileHashToFileId.remove(hashHex)
             Log.e(TAG, "Failed to start advertising", e)
             EventLog.log("ble", "Failed to start advertising: ${e.message}")
         }
     }
 
+    private fun startRotationIfNeeded() {
+        if (rotationRunning || advertisingFiles.size <= 1) return
+        rotationRunning = true
+        rotationThread = Thread({
+            while (rotationRunning && advertisingFiles.size > 0) {
+                try { Thread.sleep(3000) } catch (_: InterruptedException) { break }
+                if (advertisingFiles.isEmpty()) break
+                currentAdIndex = (currentAdIndex + 1) % advertisingFiles.size
+                startAdWithCurrentFile()
+            }
+            rotationRunning = false
+        }, "adv-rotation").also { it.isDaemon = true; it.start() }
+    }
+
     @SuppressLint("MissingPermission")
     fun stopAdvertising(fileId: String) {
-        activeAdvertisements.remove(fileId)?.let { callback ->
-            try { advertiser?.stopAdvertising(callback) } catch (e: Exception) { EventLog.log("ble", "Error stopping advertising: ${e.message}") }
-        }
+        val removed = advertisingFiles.removeAll { it.first == fileId }
+        if (!removed) return
         fileHashToFileId.entries.removeAll { it.value == fileId }
+        if (advertisingFiles.isEmpty()) {
+            // No more files to advertise — stop the BLE ad.
+            rotationRunning = false
+            rotationThread?.interrupt()
+            rotationThread = null
+            currentAdCallback?.let { cb ->
+                try { advertiser?.stopAdvertising(cb) } catch (_: Exception) {}
+                currentAdCallback = null
+            }
+            servicedFileId = null
+            EventLog.log("ble", "Advertising stopped (no files)")
+        } else {
+            // If we were advertising the removed file, switch to the next one.
+            if (currentAdIndex >= advertisingFiles.size) currentAdIndex = 0
+            startAdWithCurrentFile()
+            EventLog.log("ble", "Advertising removed $fileId (remaining=${advertisingFiles.size})")
+        }
     }
 
     @SuppressLint("MissingPermission")
     fun stopAllAdvertising() {
-        val callbacks = activeAdvertisements.values.toList()
-        activeAdvertisements.clear()
-        for (callback in callbacks) {
-            try { advertiser?.stopAdvertising(callback) } catch (e: Exception) { EventLog.log("ble", "Error stopping advertising: ${e.message}") }
+        rotationRunning = false
+        rotationThread?.interrupt()
+        rotationThread = null
+        advertisingFiles.clear()
+        currentAdCallback?.let { cb ->
+            try { advertiser?.stopAdvertising(cb) } catch (_: Exception) {}
+            currentAdCallback = null
         }
+        fileHashToFileId.clear()
+        servicedFileId = null
     }
 
     @SuppressLint("MissingPermission")
