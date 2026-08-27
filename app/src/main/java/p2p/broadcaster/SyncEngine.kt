@@ -7,6 +7,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -36,6 +39,11 @@ class SyncEngine(
     private val lastProbeAt = ConcurrentHashMap<String, Long>()
     private val advertisedFiles = ConcurrentHashMap.newKeySet<String>()
     var onFileReceived: ((fileId: String, version: Int) -> Unit)? = null
+
+    private val _downloadingFileIds = MutableStateFlow<Set<String>>(emptySet())
+    val downloadingFileIds: StateFlow<Set<String>> = _downloadingFileIds.asStateFlow()
+
+    val activeStreamingFileIds: StateFlow<Set<String>> get() = blePeripheralService.activeStreamingFileIds
 
     fun start() {
         if (engineJob?.isActive == true) return
@@ -68,7 +76,9 @@ class SyncEngine(
             try {
                 val broadcasts = broadcastDao.getAll()
                 for (b in broadcasts) {
-                    try { startAdvertising(b) } catch (e: Exception) { Log.e(TAG, "startAdvertising failed", e); EventLog.log("ble", "startAdvertising failed: ${e.message}") }
+                    try {
+                        startAdvertising(b)
+                    } catch (e: Exception) { Log.e(TAG, "startAdvertising failed", e); EventLog.log("ble", "startAdvertising failed: ${e.message}") }
                 }
                 EventLog.log("adv", "Loaded ${broadcasts.size} existing broadcasts")
             } catch (e: Exception) { Log.e(TAG, "Initial broadcast load failed", e) }
@@ -280,6 +290,8 @@ class SyncEngine(
 
     /** Subscriber receiving a new version of a subscribed file. */
     private suspend fun fetchAndUpdateSubscription(subscription: SubscriptionEntity, newVersion: Int, deviceAddress: String): Boolean {
+        _downloadingFileIds.value = _downloadingFileIds.value + subscription.fileId
+        EventLog.log("sync", "Download started for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
         try {
             val fileIdHash = cryptoService.fileIdHash(subscription.fileId)
             val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
@@ -356,6 +368,7 @@ class SyncEngine(
             onFileReceived?.invoke(subscription.fileId, newVersion)
             return true
         } catch (e: Exception) { Log.e(TAG, "Error fetching sub update ${subscription.fileId}", e); EventLog.log("sync", "Error fetching sub update ${subscription.fileId}: ${e.message}"); return false }
+        finally { _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId }
     }
 
     fun stopAdvertisingForFile(fileId: String) {

@@ -20,6 +20,9 @@ import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import p2p.broadcaster.EventLog
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.runBlocking
 
 class BlePeripheralService(private val context: Context) {
@@ -57,6 +60,10 @@ class BlePeripheralService(private val context: Context) {
     private val streams = java.util.concurrent.ConcurrentHashMap<String, Stream>()
     private val subscribedCentrals = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    private val _activeStreamingFileIds = MutableStateFlow<Set<String>>(emptySet())
+    val activeStreamingFileIds: StateFlow<Set<String>> = _activeStreamingFileIds.asStateFlow()
+    private val streamToFileId = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     fun setServeFileLoader(loader: (fileId: String, version: Int) -> ByteArray?) { serveFileLoaderField = loader }
 
     fun setMetaPayloadProvider(provider: suspend (String) -> BleMetaPayload?) {
@@ -83,7 +90,14 @@ class BlePeripheralService(private val context: Context) {
                     EventLog.log("ble", "Broadcaster: central $addr CONNECTED (status=$status)")
                 else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
                     EventLog.log("ble", "Broadcaster: central $addr DISCONNECTED (status=$status)")
-                    device?.address?.let { streams.remove(it); subscribedCentrals.remove(it) }
+                    device?.address?.let { addr ->
+                        val fId = streamToFileId.remove(addr)
+                        if (fId != null) {
+                            _activeStreamingFileIds.value = _activeStreamingFileIds.value - fId
+                            EventLog.log("ble", "Stream ended for ${fId.takeLast(8)} (disconnect) [active streams: ${_activeStreamingFileIds.value.size}]")
+                        }
+                        streams.remove(addr); subscribedCentrals.remove(addr)
+                    }
                 }
             }
             override fun onCharacteristicReadRequest(device: BluetoothDevice?, requestId: Int, offset: Int, characteristic: BluetoothGattCharacteristic?) {
@@ -144,7 +158,9 @@ class BlePeripheralService(private val context: Context) {
                         return
                     }
                     streams[device.address] = Stream(data, 0)
-                    EventLog.log("ble", "Stream armed: v$version (${data.size}B) -> ${device.address.takeLast(5)}")
+                    streamToFileId[device.address] = fileId
+                    _activeStreamingFileIds.value = _activeStreamingFileIds.value + fileId
+                    EventLog.log("ble", "Stream armed: v$version (${data.size}B) -> ${device.address.takeLast(5)} [active streams: ${_activeStreamingFileIds.value.size}]")
                     if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
                     pushStreamTo(device.address)
                 } else if (responseNeeded) {
@@ -208,7 +224,14 @@ class BlePeripheralService(private val context: Context) {
                     }
                     Thread.sleep(10) // give Samsung BLE stack time to process
                 }
-            } finally { pushing.remove(address) }
+            } finally {
+                pushing.remove(address)
+                val fId = streamToFileId.remove(address)
+                if (fId != null) {
+                    _activeStreamingFileIds.value = _activeStreamingFileIds.value - fId
+                    EventLog.log("ble", "Stream ended for ${fId.takeLast(8)} (complete) [active streams: ${_activeStreamingFileIds.value.size}]")
+                }
+            }
         }.start()
     }
 
@@ -252,7 +275,9 @@ class BlePeripheralService(private val context: Context) {
             .build()
         val callback = object : AdvertiseCallback() {
             override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
-                Log.d(TAG, "Advertising: ${fileId.takeLast(8)} v${serviceData[6].toInt() and 0xFF}")
+                val v = ((serviceData[6].toInt() and 0xFF) shl 24) or ((serviceData[7].toInt() and 0xFF) shl 16) or ((serviceData[8].toInt() and 0xFF) shl 8) or (serviceData[9].toInt() and 0xFF)
+                Log.d(TAG, "Advertising started: ${fileId.takeLast(8)} v$v")
+                EventLog.log("ble", "Advertising ${fileId.takeLast(8)} v$v (${advertisingFiles.size} files queued)")
             }
             override fun onStartFailure(errorCode: Int) {
                 Log.e(TAG, "Advertising failed: $errorCode")
@@ -266,17 +291,29 @@ class BlePeripheralService(private val context: Context) {
         }
     }
 
+
+
     private fun startRotationIfNeeded() {
-        if (rotationRunning || advertisingFiles.size <= 1) return
+        if (rotationRunning) return
+        if (advertisingFiles.size <= 1) {
+            EventLog.log("ble", "Rotation skipped (${advertisingFiles.size} file(s) — static advertising)")
+            return
+        }
+        val intervalMs = 30_000L
         rotationRunning = true
+        EventLog.log("ble", "Rotation thread starting (${advertisingFiles.size} files, ${intervalMs / 1000}s interval)")
         rotationThread = Thread({
-            while (rotationRunning && advertisingFiles.size > 0) {
-                try { Thread.sleep(3000) } catch (_: InterruptedException) { break }
-                if (advertisingFiles.isEmpty()) break
+            while (rotationRunning && advertisingFiles.size > 1) {
+                try { Thread.sleep(intervalMs) } catch (_: InterruptedException) { break }
+                if (advertisingFiles.size <= 1) break
+                val prev = advertisingFiles[currentAdIndex % advertisingFiles.size].first.takeLast(8)
                 currentAdIndex = (currentAdIndex + 1) % advertisingFiles.size
+                val next = advertisingFiles[currentAdIndex % advertisingFiles.size].first.takeLast(8)
+                EventLog.log("ble", "Rotation: $prev -> $next (${advertisingFiles.size} files)")
                 startAdWithCurrentFile()
             }
             rotationRunning = false
+            EventLog.log("ble", "Rotation thread stopped")
         }, "adv-rotation").also { it.isDaemon = true; it.start() }
     }
 
@@ -285,6 +322,7 @@ class BlePeripheralService(private val context: Context) {
         val removed = advertisingFiles.removeAll { it.first == fileId }
         if (!removed) return
         fileHashToFileId.entries.removeAll { it.value == fileId }
+        EventLog.log("ble", "stopAdvertising ${fileId.takeLast(8)} (remaining=${advertisingFiles.size})")
         if (advertisingFiles.isEmpty()) {
             // No more files to advertise — stop the BLE ad.
             rotationRunning = false
@@ -296,11 +334,19 @@ class BlePeripheralService(private val context: Context) {
             }
             servicedFileId = null
             EventLog.log("ble", "Advertising stopped (no files)")
+        } else if (advertisingFiles.size == 1) {
+            // Down to one file — stop rotation, switch to static advertising.
+            rotationRunning = false
+            rotationThread?.interrupt()
+            rotationThread = null
+            currentAdIndex = 0
+            startAdWithCurrentFile()
+            EventLog.log("ble", "Advertising down to 1 file — rotation stopped, static mode")
         } else {
-            // If we were advertising the removed file, switch to the next one.
+            // Multiple files remain — if we were advertising the removed file, switch to next.
             if (currentAdIndex >= advertisingFiles.size) currentAdIndex = 0
             startAdWithCurrentFile()
-            EventLog.log("ble", "Advertising removed $fileId (remaining=${advertisingFiles.size})")
+            EventLog.log("ble", "Advertising switched to next file (${advertisingFiles.size} remaining)")
         }
     }
 

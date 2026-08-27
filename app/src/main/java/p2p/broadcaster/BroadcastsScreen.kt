@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -21,6 +23,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -56,6 +59,7 @@ class BroadcastsViewModel(
 ) : ViewModel() {
     private val _broadcasts = MutableStateFlow<List<BroadcastEntity>>(emptyList())
     val broadcasts: StateFlow<List<BroadcastEntity>> = _broadcasts.asStateFlow()
+    val relayingFileIds: StateFlow<Set<String>> get() = syncEngine?.activeStreamingFileIds ?: MutableStateFlow(emptySet())
 
     init {
         viewModelScope.launch { refresh() }
@@ -65,7 +69,7 @@ class BroadcastsViewModel(
     }
 
     private suspend fun refresh() {
-        _broadcasts.value = broadcastDao.getAll().filter { it.role == Role.ORIGINATOR }
+        _broadcasts.value = broadcastDao.getAll()
     }
 
     fun importAndBroadcast(uri: Uri, context: android.content.Context) {
@@ -161,6 +165,7 @@ fun BroadcastsScreen(
     val app = context.applicationContext as P2PBroadcasterApp
     val viewModel = remember { BroadcastsViewModel(app.broadcastDao, app.cryptoService, app.fileService, app.syncEngine) }
     val broadcasts by viewModel.broadcasts.collectAsState()
+    val activeStreamingFileIds by viewModel.relayingFileIds.collectAsState()
     val pickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let { viewModel.importAndBroadcast(it, context) }
     }
@@ -199,7 +204,15 @@ fun BroadcastsScreen(
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(broadcast.fileName, style = MaterialTheme.typography.titleMedium)
                             Text("v${broadcast.version} | ${formatSize(broadcast.fileSize)}", style = MaterialTheme.typography.bodySmall)
-                            Text("Advertising", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                            val isStreaming = activeStreamingFileIds.contains(broadcast.fileId)
+                            val statusText = if (isStreaming) "Relaying" else "Advertising"
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (isStreaming) {
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                }
+                                Text(statusText, style = MaterialTheme.typography.bodySmall, color = if (isStreaming) androidx.compose.ui.graphics.Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary)
+                            }
                             Spacer(modifier = Modifier.height(8.dp))
                             Row {
                                 IconButton(onClick = {

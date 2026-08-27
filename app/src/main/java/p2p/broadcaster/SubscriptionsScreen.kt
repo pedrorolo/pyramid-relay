@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -25,6 +27,7 @@ import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -60,6 +63,8 @@ class SubscriptionsViewModel(
 ) : ViewModel() {
     private val _subscriptions = MutableStateFlow<List<SubscriptionEntity>>(emptyList())
     val subscriptions: StateFlow<List<SubscriptionEntity>> = _subscriptions.asStateFlow()
+    val downloadingFileIds: StateFlow<Set<String>> get() = syncEngine?.downloadingFileIds ?: MutableStateFlow(emptySet())
+    val activeStreamingFileIds: StateFlow<Set<String>> get() = syncEngine?.activeStreamingFileIds ?: MutableStateFlow(emptySet())
 
     init {
         viewModelScope.launch { refresh() }
@@ -116,6 +121,8 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
     val app = context.applicationContext as P2PBroadcasterApp
     val viewModel = remember { SubscriptionsViewModel(app.subscriptionDao, app.broadcastDao, app.fileService, app.cryptoService, app.syncEngine) }
     val subscriptions by viewModel.subscriptions.collectAsState()
+    val downloadingFileIds by viewModel.downloadingFileIds.collectAsState()
+    val activeStreamingFileIds by viewModel.activeStreamingFileIds.collectAsState()
     var showPasteDialog by remember { mutableStateOf(false) }
     var showQrScan by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf<SubscriptionEntity?>(null) }
@@ -142,6 +149,8 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
                     items(subscriptions, key = { it.fileId }) { subscription ->
                         SubscriptionRow(
                             subscription = subscription,
+                            isDownloading = downloadingFileIds.contains(subscription.fileId),
+                            isStreaming = activeStreamingFileIds.contains(subscription.fileId),
                             onDelete = { showDeleteConfirm = subscription }
                         )
                     }
@@ -198,7 +207,7 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
 }
 
 @Composable
-fun SubscriptionRow(subscription: SubscriptionEntity, onDelete: () -> Unit) {
+fun SubscriptionRow(subscription: SubscriptionEntity, isDownloading: Boolean = false, isStreaming: Boolean = false, onDelete: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as P2PBroadcasterApp
     var showQr by remember { mutableStateOf(false) }
@@ -233,16 +242,21 @@ fun SubscriptionRow(subscription: SubscriptionEntity, onDelete: () -> Unit) {
                 "Local: v${subscription.localVersion}" +
                     (subscription.lastSeenVersion?.let { " | Seen: v$it" } ?: "")
             } else {
-                "Not fetched" +
-                    (subscription.lastSeenVersion?.let { " | Seen: v$it" } ?: "")
+                (subscription.lastSeenVersion?.let { "Seen: v$it" } ?: "No local copy")
             }
-            Text(versionText, style = MaterialTheme.typography.bodySmall)
+            Text(versionText, style = MaterialTheme.typography.bodySmall, color = if (subscription.localVersion == null) androidx.compose.ui.graphics.Color(0xFFE53935) else MaterialTheme.colorScheme.onSurface)
             val status = when {
-                subscription.localVersion == null && subscription.lastSeenVersion == null -> "Listening"
-                subscription.localVersion == null -> "Downloading"
-                else -> "Ready"
+                isDownloading -> "Downloading"
+                isStreaming -> "Relaying"
+                else -> "Listening"
             }
-            Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (status == "Downloading" || status == "Relaying") {
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                }
+                Text(status, style = MaterialTheme.typography.bodySmall, color = if (status == "Downloading" || status == "Relaying") androidx.compose.ui.graphics.Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary)
+            }
             Spacer(modifier = Modifier.height(8.dp))
             Row {
                 val clipboardManager = LocalClipboardManager.current
