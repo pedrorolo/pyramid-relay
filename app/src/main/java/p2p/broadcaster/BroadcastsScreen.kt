@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Refresh
@@ -25,7 +26,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -34,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -119,7 +123,8 @@ class BroadcastsViewModel(
             }
             val fileBytes = inputStream.readBytes()
             inputStream.close()
-            EventLog.log("adv", "updateBroadcast: read ${fileBytes.size} bytes from new file")
+            val newFileName = fileService.getFileName(uri)
+            EventLog.log("adv", "updateBroadcast: read ${fileBytes.size} bytes from new file (name=\"$newFileName\")")
             val vDir = fileService.getVersionDir(broadcast.fileId, newVersion); vDir.mkdirs()
             val file = fileService.getFile(broadcast.fileId, newVersion); file.writeBytes(fileBytes)
             EventLog.log("adv", "updateBroadcast: wrote file to ${file.absolutePath}")
@@ -135,11 +140,15 @@ class BroadcastsViewModel(
             val signatureStr = Base64.getEncoder().encodeToString(signature)
             EventLog.log("adv", "updateBroadcast: stopping old advertisement")
             syncEngine?.stopAdvertisingForFile(broadcast.fileId)
+            val effectiveFileName = newFileName.takeIf { it.isNotBlank() && it != "unknown" } ?: broadcast.fileName
+            if (effectiveFileName != broadcast.fileName) {
+                EventLog.log("adv", "updateBroadcast: filename changed \"${broadcast.fileName}\" -> \"$effectiveFileName\"")
+            }
             EventLog.log("adv", "updateBroadcast: updating DB version to v$newVersion")
-            broadcastDao.updateVersion(broadcast.fileId, newVersion, hashStr, signatureStr, file.absolutePath, fileBytes.size.toLong(), System.currentTimeMillis())
+            broadcastDao.updateVersion(broadcast.fileId, newVersion, hashStr, signatureStr, file.absolutePath, fileBytes.size.toLong(), System.currentTimeMillis(), effectiveFileName)
             EventLog.log("adv", "updateBroadcast: DB updated, evicting old versions")
             fileService.evictOldVersions(broadcast.fileId, newVersion)
-            EventLog.log("adv", "updateBroadcast: DONE - \"${broadcast.fileName}\" updated to v$newVersion")
+            EventLog.log("adv", "updateBroadcast: DONE - \"$effectiveFileName\" updated to v$newVersion")
         }
     }
 }
@@ -156,6 +165,8 @@ fun BroadcastsScreen(
         uri?.let { viewModel.importAndBroadcast(it, context) }
     }
     var updateTarget by remember { mutableStateOf<BroadcastEntity?>(null) }
+    var showUpdateConfirm by remember { mutableStateOf<BroadcastEntity?>(null) }
+    var showDeleteConfirm by remember { mutableStateOf<BroadcastEntity?>(null) }
     val updateLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null && updateTarget != null) {
             viewModel.updateBroadcast(updateTarget!!, uri, context)
@@ -170,6 +181,7 @@ fun BroadcastsScreen(
             }
         }
     ) { padding ->
+        val clipboardManager = LocalClipboardManager.current
         if (broadcasts.isEmpty()) {
             Column(
                 modifier = Modifier.fillMaxSize().padding(padding).padding(32.dp),
@@ -197,13 +209,24 @@ fun BroadcastsScreen(
                                         Base64.getUrlDecoder().decode(broadcast.publicKey)
                                     }
                                     val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
+                                    val nameEnc = java.net.URLEncoder.encode(broadcast.fileName, "UTF-8")
+                                    val link = "p2pbroadcaster://subscribe?fileId=${broadcast.fileId}&pk=$pkUrl&name=$nameEnc&v=${broadcast.version}"
+                                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(link))
+                                    EventLog.log("app", "Link copied to clipboard")
+                                }) { Icon(Icons.Default.ContentCopy, contentDescription = "Copy Link") }
+                                IconButton(onClick = {
+                                    val pkBytes = try {
+                                        Base64.getDecoder().decode(broadcast.publicKey)
+                                    } catch (e: Exception) {
+                                        Base64.getUrlDecoder().decode(broadcast.publicKey)
+                                    }
+                                    val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
                                     onShareQr(broadcast.fileId, pkUrl, broadcast.fileName, broadcast.version)
                                 }) { Icon(Icons.Default.QrCode, contentDescription = "Share QR") }
                                 IconButton(onClick = {
-                                    updateTarget = broadcast
-                                    updateLauncher.launch(arrayOf("*/*"))
+                                    showUpdateConfirm = broadcast
                                 }) { Icon(Icons.Default.Refresh, contentDescription = "Update") }
-                                IconButton(onClick = { viewModel.deleteBroadcast(broadcast) }) {
+                                IconButton(onClick = { showDeleteConfirm = broadcast }) {
                                     Icon(Icons.Default.Delete, contentDescription = "Delete")
                                 }
                             }
@@ -212,6 +235,37 @@ fun BroadcastsScreen(
                 }
             }
         }
+    }
+
+    showUpdateConfirm?.let { broadcast ->
+        AlertDialog(
+            onDismissRequest = { showUpdateConfirm = null },
+            title = { Text("Update broadcast?") },
+            text = { Text("Replace \"${broadcast.fileName}\" with a new file? This will increment the version to v${broadcast.version + 1}.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showUpdateConfirm = null
+                    updateTarget = broadcast
+                    updateLauncher.launch(arrayOf("*/*"))
+                }) { Text("Update") }
+            },
+            dismissButton = { TextButton(onClick = { showUpdateConfirm = null }) { Text("Cancel") } }
+        )
+    }
+
+    showDeleteConfirm?.let { broadcast ->
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = null },
+            title = { Text("Delete broadcast?") },
+            text = { Text("Permanently delete \"${broadcast.fileName}\"? This will stop advertising and remove all local files.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirm = null
+                    viewModel.deleteBroadcast(broadcast)
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { showDeleteConfirm = null }) { Text("Cancel") } }
+        )
     }
 }
 

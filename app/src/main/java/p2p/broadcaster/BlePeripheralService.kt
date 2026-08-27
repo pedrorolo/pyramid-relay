@@ -41,6 +41,8 @@ class BlePeripheralService(private val context: Context) {
     // has one fixed META char (152B), so it can only serve one file's meta; track the
     // most recently advertised file. (Most deployments broadcast one file at a time.)
     private var servicedFileId: String? = null
+    // Maps 6-byte fileIdHash hex -> fileId so the central can SELECT which file to serve.
+    private val fileHashToFileId = java.util.concurrent.ConcurrentHashMap<String, String>()
     private var metaPayloadProvider: (suspend (String) -> BleMetaPayload?)? = null
     // GATT file streaming: a central subscribes to STREAM notifications, writes
     // "PULL v<version>", and the peripheral then pushes chunks as fast as the ATT
@@ -111,6 +113,19 @@ class BlePeripheralService(private val context: Context) {
                 val device = device ?: return
                 if (char.uuid == STREAM_UUID) {
                     val cmd = value?.toString(Charsets.UTF_8) ?: ""
+                    if (cmd.startsWith("SELECT ")) {
+                        val hexHash = cmd.substringAfter("SELECT ").trim()
+                        val matchFileId = fileHashToFileId[hexHash]
+                        if (matchFileId != null) {
+                            servicedFileId = matchFileId
+                            EventLog.log("ble", "SELECT $hexHash -> ${matchFileId.takeLast(8)}")
+                            if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                        } else {
+                            EventLog.log("ble", "SELECT $hexHash - no match")
+                            if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null)
+                        }
+                        return
+                    }
                     val version = Regex("PULL v(\\d+)").find(cmd)?.groupValues?.get(1)?.toIntOrNull()
                     val fileId = servicedFileId
                     if (version == null || fileId == null) {
@@ -195,13 +210,13 @@ class BlePeripheralService(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun startAdvertising(fileId: String, serviceData: ByteArray) {
+        if (activeAdvertisements.containsKey(fileId)) return
         val adv = adapter?.bluetoothLeAdvertiser ?: run {
             EventLog.log("ble", "BLE advertiser not available")
             return
         }
         advertiser = adv
         servicedFileId = fileId
-        stopAdvertising(fileId) // replace any existing advertisement for this file
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setConnectable(true).setTimeout(0)
@@ -220,8 +235,12 @@ class BlePeripheralService(private val context: Context) {
             }
         }
         activeAdvertisements[fileId] = callback
+        // Track fileIdHash -> fileId so SELECT works.
+        val hashHex = serviceData.copyOfRange(0, 6).joinToString("") { "%02x".format(it) }
+        fileHashToFileId[hashHex] = fileId
         try { adv.startAdvertising(settings, data, callback) } catch (e: Exception) {
             activeAdvertisements.remove(fileId)
+            fileHashToFileId.remove(hashHex)
             Log.e(TAG, "Failed to start advertising", e)
             EventLog.log("ble", "Failed to start advertising: ${e.message}")
         }
@@ -232,6 +251,7 @@ class BlePeripheralService(private val context: Context) {
         activeAdvertisements.remove(fileId)?.let { callback ->
             try { advertiser?.stopAdvertising(callback) } catch (e: Exception) { EventLog.log("ble", "Error stopping advertising: ${e.message}") }
         }
+        fileHashToFileId.entries.removeAll { it.value == fileId }
     }
 
     @SuppressLint("MissingPermission")

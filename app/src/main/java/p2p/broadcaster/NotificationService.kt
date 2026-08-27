@@ -32,10 +32,17 @@ class NotificationService(private val context: Context) {
     }
 
     fun createForegroundNotification(): Notification? {
+        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         return Notification.Builder(context, FG_CHANNEL_ID)
-            .setContentTitle("P2P Broadcaster")
-            .setContentText("Scanning for nearby files...")
+            .setContentTitle("P2P Broadcaster — Relaying files")
+            .setContentText("Keep this notification to relay files to nearby devices")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
     }

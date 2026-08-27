@@ -91,11 +91,12 @@ class BleCentralService(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    suspend fun readMeta(deviceAddress: String): BleMetaPayload? {
+    suspend fun readMeta(deviceAddress: String, fileIdHash: ByteArray? = null): BleMetaPayload? {
         val device = bluetoothManager.adapter?.getRemoteDevice(deviceAddress) ?: run {
             EventLog.log("ble", "readMeta: adapter or device unavailable for ${deviceAddress.takeLast(5)}")
             return null
         }
+        val hexHash = fileIdHash?.joinToString("") { "%02x".format(it) }
         // Samsung BLE connections frequently fail on the first attempt (status !=
         // GATT_SUCCESS). Retry a few times before giving up.
         var lastStatus = -1
@@ -107,15 +108,10 @@ class BleCentralService(private val context: Context) {
                     lastStatus = status
                     if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
                         EventLog.log("ble", "GATT connected to ${deviceAddress.takeLast(5)} (attempt $attemptNo)")
-                        // Clear potentially stale cached service tables (needed on Samsung
-                        // after app updates - refresh() is hidden API, use reflection).
                         try {
                             val refresh = gatt.javaClass.getMethod("refresh")
                             refresh.invoke(gatt)
                         } catch (_: Exception) {}
-                        // The meta payload is 152 bytes; the default ATT MTU of 23 is far too
-                        // small for a single read. Negotiate a bigger MTU first and only
-                        // proceed to service discovery once it has changed.
                         if (!gatt.requestMtu(512)) gatt.discoverServices()
                     } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
                         EventLog.log("ble", "GATT disconnected from ${deviceAddress.takeLast(5)} (attempt $attemptNo, status=$status)")
@@ -129,8 +125,27 @@ class BleCentralService(private val context: Context) {
 
                 override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
                     if (status != BluetoothGatt.GATT_SUCCESS) { EventLog.log("ble", "Service discovery FAILED for ${deviceAddress.takeLast(5)} (status=$status)"); deferred.complete(null); return }
+                    if (hexHash != null) {
+                        val streamChar = gatt.getService(SERVICE_UUID)?.getCharacteristic(STREAM_UUID)
+                        if (streamChar != null) {
+                            val submit = gatt.writeCharacteristic(streamChar, "SELECT $hexHash".toByteArray(Charsets.UTF_8), android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+                            if (submit == BluetoothGatt.GATT_SUCCESS) return
+                            EventLog.log("ble", "SELECT write failed ($submit), reading META directly")
+                        }
+                    }
                     val metaChar = gatt.getService(SERVICE_UUID)?.getCharacteristic(META_UUID)
                     if (metaChar != null) gatt.readCharacteristic(metaChar) else { EventLog.log("ble", "META characteristic not found on ${deviceAddress.takeLast(5)}"); deferred.complete(null) }
+                }
+                override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+                    if (characteristic.uuid == STREAM_UUID) {
+                        if (status == BluetoothGatt.GATT_SUCCESS) {
+                            val metaChar = gatt.getService(SERVICE_UUID)?.getCharacteristic(META_UUID)
+                            if (metaChar != null) gatt.readCharacteristic(metaChar) else { deferred.complete(null) }
+                        } else {
+                            EventLog.log("ble", "SELECT rejected ($status) for ${deviceAddress.takeLast(5)}")
+                            deferred.complete(null); gatt.disconnect(); gatt.close()
+                        }
+                    }
                 }
                 override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
                     if (status == BluetoothGatt.GATT_SUCCESS && characteristic.uuid == META_UUID)
@@ -139,14 +154,10 @@ class BleCentralService(private val context: Context) {
                     gatt.disconnect(); gatt.close()
                 }
             }
-            // TRANSPORT_LE forces the BLE transport - without it dual-mode Samsung
-            // phones may pick Bluetooth Classic (BR/EDR), which produces bogus
-            // instant GATT errors like status=2 on characteristic reads.
             device.connectGatt(context, false, gattCallback, android.bluetooth.BluetoothDevice.TRANSPORT_LE)
             EventLog.log("ble", "GATT connect to ${deviceAddress.takeLast(5)} for meta read (attempt $attemptNo)")
             val result = try { withTimeout(10_000L) { deferred.await() } } catch (e: Exception) { Log.e(TAG, "Timeout reading meta from $deviceAddress", e); EventLog.log("ble", "Meta read TIMED OUT from ${deviceAddress.takeLast(5)} (attempt $attemptNo)"); null }
             if (result != null) return result
-            // Brief backoff before retry
             kotlinx.coroutines.delay(300)
         }
         EventLog.log("ble", "Meta read FAILED after 3 attempts for ${deviceAddress.takeLast(5)} (last status=$lastStatus)")

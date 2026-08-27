@@ -168,7 +168,7 @@ class SyncEngineTest {
 
         engine.handleDiscoveredDevice("AA:BB:CC:DD:EE:FF", serviceData)
 
-        coVerify(exactly = 1) { bleCentralService.readMeta(any()) }
+        coVerify(exactly = 1) { bleCentralService.readMeta(any(), any()) }
     }
 
     @Test
@@ -192,7 +192,7 @@ class SyncEngineTest {
 
         engine.handleDiscoveredDevice("AA:BB:CC:DD:EE:FF", serviceData)
 
-        coVerify(exactly = 0) { bleCentralService.readMeta(any()) }
+        coVerify(exactly = 0) { bleCentralService.readMeta(any(), any()) }
     }
 
     @Test
@@ -215,7 +215,7 @@ class SyncEngineTest {
 
         engine.handleDiscoveredDevice("AA:BB:CC:DD:EE:FF", serviceData)
 
-        coVerify(exactly = 0) { bleCentralService.readMeta(any()) }
+        coVerify(exactly = 0) { bleCentralService.readMeta(any(), any()) }
     }
 
     @Test
@@ -228,7 +228,7 @@ class SyncEngineTest {
         )
         coEvery { subscriptionDao.getAll() } returns listOf(subscription)
         coEvery { broadcastDao.getAll() } returns emptyList()
-        coEvery { bleCentralService.readMeta(any()) } returns null
+        coEvery { bleCentralService.readMeta(any(), any()) } returns null
 
         val fileIdHash = cryptoService.fileIdHash(fileId)
         val keyId = cryptoService.keyId(pubKeyStr)
@@ -239,7 +239,7 @@ class SyncEngineTest {
 
         engine.handleDiscoveredDevice("AA:BB:CC:DD:EE:FF", serviceData)
 
-        coVerify { bleCentralService.readMeta("AA:BB:CC:DD:EE:FF") }
+        coVerify { bleCentralService.readMeta("AA:BB:CC:DD:EE:FF", any()) }
     }
 
     @Test
@@ -271,7 +271,7 @@ class SyncEngineTest {
         val sub2 = SubscriptionEntity(UUID.randomUUID().toString(), "otherpk", "b", null, null, 0L, null, null, null)
         coEvery { subscriptionDao.getAll() } returns listOf(sub1, sub2)
         coEvery { broadcastDao.getAll() } returns emptyList()
-        coEvery { bleCentralService.readMeta(any()) } returns null
+        coEvery { bleCentralService.readMeta(any(), any()) } returns null
 
         val fileIdHash = cryptoService.fileIdHash(fileId)
         val keyId = cryptoService.keyId(pubKeyStr)
@@ -282,7 +282,7 @@ class SyncEngineTest {
 
         engine.handleDiscoveredDevice("AA:BB:CC:DD:EE:FF", serviceData)
 
-        coVerify { bleCentralService.readMeta("AA:BB:CC:DD:EE:FF") }
+        coVerify { bleCentralService.readMeta("AA:BB:CC:DD:EE:FF", any()) }
     }
 
     @Test
@@ -352,7 +352,7 @@ class SyncEngineTest {
 
         engine.handleDiscoveredDevice("AA:BB:CC:DD:EE:FF", serviceData)
 
-        coVerify(exactly = 0) { bleCentralService.readMeta(any()) }
+        coVerify(exactly = 0) { bleCentralService.readMeta(any(), any()) }
     }
 
     @Test
@@ -365,7 +365,7 @@ class SyncEngineTest {
 
         engine.handleDiscoveredDevice("AA:BB:CC:DD:EE:FF", serviceData)
 
-        coVerify(exactly = 0) { bleCentralService.readMeta(any()) }
+        coVerify(exactly = 0) { bleCentralService.readMeta(any(), any()) }
     }
 
     @Test
@@ -432,5 +432,63 @@ class SyncEngineTest {
                 data.size == 14 && data.copyOfRange(0, 6).contentEquals(cryptoService.fileIdHash(fileId))
             })
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Delete -> re-subscribe: stale dedup/probe state must not block refetch
+    // ------------------------------------------------------------------
+
+    private fun uuidBytes(fileId: String): ByteArray {
+        val uuid = UUID.fromString(fileId)
+        val msb = uuid.mostSignificantBits; val lsb = uuid.leastSignificantBits
+        return ByteArray(16).also { bytes ->
+            for (i in 0..7) {
+                bytes[i] = ((msb ushr (8 * (7 - i))) and 0xFF).toByte()
+                bytes[8 + i] = ((lsb ushr (8 * (7 - i))) and 0xFF).toByte()
+            }
+        }
+    }
+
+    @Test
+    fun `re-subscribed file is probed again after discovery state reset`() = runTest {
+        val fileId = UUID.randomUUID().toString()
+        val kp = cryptoService.generateEd25519KeyPair()
+        val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
+        val subscription = SubscriptionEntity(fileId, pubKeyStr, "test.txt", null, null, 0L, null, null, null)
+        coEvery { subscriptionDao.getAll() } returns listOf(subscription)
+        coEvery { broadcastDao.getAll() } returns emptyList()
+
+        val serviceData = ByteArray(14)
+        cryptoService.fileIdHash(fileId).copyInto(serviceData, 0)
+        serviceData[9] = 1 // version 1
+        cryptoService.keyId(pubKeyStr).copyInto(serviceData, 10)
+
+        // Meta carries the correct publisher key but a bogus signature: the
+        // probe (readMeta) happens and sets the cooldown, then verification fails.
+        val meta = BleMetaPayload(
+            uuidBytes(fileId), 1,
+            cryptoService.rawPublicKey(kp.public),
+            ByteArray(64),
+            cryptoService.sha256("data".toByteArray()),
+            4L,
+            "test.txt"
+        )
+        coEvery { bleCentralService.readMeta(any(), any()) } returns meta
+        val addr = "AA:BB:CC:DD:EE:FF"
+
+        // 1st discovery: probed once, signature rejected
+        assertFalse(engine.handleDiscoveredDevice(addr, serviceData))
+        coVerify(exactly = 1) { bleCentralService.readMeta(any(), any()) }
+
+        // 2nd discovery of the same advertisement: swallowed by dedup + cooldown
+        assertFalse(engine.handleDiscoveredDevice(addr, serviceData))
+        coVerify(exactly = 1) { bleCentralService.readMeta(any(), any()) }
+
+        // Delete + re-subscribe resets the discovery state
+        engine.clearDiscoveryStateForFile(fileId)
+
+        // 3rd discovery: must probe again despite the earlier cooldown
+        assertFalse(engine.handleDiscoveredDevice(addr, serviceData))
+        coVerify(exactly = 2) { bleCentralService.readMeta(any(), any()) }
     }
 }

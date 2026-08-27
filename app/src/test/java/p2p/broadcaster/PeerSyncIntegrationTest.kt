@@ -205,7 +205,7 @@ class PeerSyncIntegrationTest {
         // Subscriber picks it up; because the subscription matches fileIdHash+keyId
         // it must reach out via GATT for the meta payload.
         engineB.handleDiscoveredDevice("AA:BB:CC:DD:EE:01", airBytes)
-        coVerify(exactly = 1) { bleCentralB.readMeta("AA:BB:CC:DD:EE:01") }
+        coVerify(exactly = 1) { bleCentralB.readMeta("AA:BB:CC:DD:EE:01", any()) }
 
         // An advertisement for an unknown fileId must NOT trigger a GATT read
         val strangerBytes = ByteArray(14)
@@ -213,7 +213,7 @@ class PeerSyncIntegrationTest {
         strangerBytes[6] = 0; strangerBytes[7] = 0; strangerBytes[8] = 0; strangerBytes[9] = 9
         cryptoA.keyId(entity.publicKey).copyInto(strangerBytes, 10)
         assertFalse(engineB.handleDiscoveredDevice("AA:BB:CC:DD:EE:02", strangerBytes))
-        coVerify(exactly = 1) { bleCentralB.readMeta(any()) }
+        coVerify(exactly = 1) { bleCentralB.readMeta(any(), any()) }
     }
 
     // ------------------------------------------------------------------
@@ -261,7 +261,7 @@ class PeerSyncIntegrationTest {
 
         // Stub only the radios; connect them to each other with real payloads
         engineA.startAdvertising(entity)
-        coEvery { bleCentralB.readMeta(any()) } coAnswers { gattReadFromA() }
+        coEvery { bleCentralB.readMeta(any(), any()) } coAnswers { gattReadFromA() }
         stubGattTransfer()
 
         // Act: B hears the advertisement and runs its whole receive pipeline
@@ -270,10 +270,12 @@ class PeerSyncIntegrationTest {
         // Database side: subscription advanced to v2 with a real location in B's store
         val updatedSlot = slot<Int>()
         val uriSlot = slot<String>()
+        val nameSlot = slot<String>()
         coVerify(exactly = 1) {
-            subscriptionDaoB.updateReceived(entity.fileId, capture(updatedSlot), capture(uriSlot), any(), any())
+            subscriptionDaoB.updateReceived(entity.fileId, capture(updatedSlot), capture(uriSlot), any(), any(), capture(nameSlot))
         }
         assertEquals(entity.version, updatedSlot.captured)
+        assertEquals(entity.fileName, nameSlot.captured)
 
         // Physical side: the delivered file lives in B's store and is byte-identical
         val receivedFile = File(uriSlot.captured)
@@ -314,12 +316,13 @@ class PeerSyncIntegrationTest {
         val forgedPayload = BleMetaPayload(
             uuidToBytesUnchecked(entity.fileId), entity.version,
             cryptoB.rawPublicKey(attackerKp.public), attackerSig,
-            cryptoB.sha256(content), content.size.toLong()
+            cryptoB.sha256(content), content.size.toLong(),
+            entity.fileName ?: "file"
         )
-        coEvery { bleCentralB.readMeta(any()) } returns forgedPayload
+        coEvery { bleCentralB.readMeta(any(), any()) } returns forgedPayload
 
         assertFalse(engineB.handleDiscoveredDevice("AA:BB:CC:DD:EE:05", advertisementsA[entity.fileId]!!))
-        coVerify(exactly = 0) { subscriptionDaoB.updateReceived(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { subscriptionDaoB.updateReceived(any(), any(), any(), any(), any(), any()) }
         assertTrue(advertisementsB.isEmpty()) // nothing got relayed either
     }
 
@@ -333,11 +336,11 @@ class PeerSyncIntegrationTest {
 
         // Correct publisher key, corrupted signature over the claimed version/hash
         val good = gattReadFromA()!!
-        val bad = BleMetaPayload(good.fileId, good.version, good.publicKey, good.signature.copyOf().also { it[10]++ }, good.fileHash, good.fileSize)
-        coEvery { bleCentralB.readMeta(any()) } returns bad
+        val bad = BleMetaPayload(good.fileId, good.version, good.publicKey, good.signature.copyOf().also { it[10]++ }, good.fileHash, good.fileSize, good.fileName)
+        coEvery { bleCentralB.readMeta(any(), any()) } returns bad
 
         assertFalse(engineB.handleDiscoveredDevice("AA:BB:CC:DD:EE:06", advertisementsA[entity.fileId]!!))
-        coVerify(exactly = 0) { subscriptionDaoB.updateReceived(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { subscriptionDaoB.updateReceived(any(), any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { bleCentralB.fetchFile(any(), any<Int>(), any<Long>(), any<OutputStream>()) }
     }
 
@@ -359,7 +362,7 @@ class PeerSyncIntegrationTest {
             engineA.startAdvertising(entity); advertisementsA[entity.fileId]!!
         }
         assertFalse(engineB.handleDiscoveredDevice("AA:BB:CC:DD:EE:07", stale))
-        coVerify(exactly = 0) { bleCentralB.readMeta(any()) }
+        coVerify(exactly = 0) { bleCentralB.readMeta(any(), any()) }
         coVerify(exactly = 0) { bleCentralB.fetchFile(any(), any<Int>(), any<Long>(), any<OutputStream>()) }
     }
 

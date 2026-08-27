@@ -25,7 +25,7 @@ class SyncEngine(
     companion object {
         private const val TAG = "SyncEngine"
         private const val DEDUP_TTL_MS = 30_000L
-        private const val PROBE_COOLDOWN_MS = 5 * 60_000L
+        private const val PROBE_COOLDOWN_MS = 60_000L
     }
 
     private val scope = testScope ?: CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -56,7 +56,14 @@ class SyncEngine(
                 if (!file.exists()) throw IllegalStateException("Requested file not available: $fileId v$version")
                 file.inputStream().use { it.copyTo(output) }
             }
-            try { blePeripheralService.startGattServer() } catch (e: Exception) { Log.e(TAG, "startGattServer failed", e); EventLog.log("ble", "startGattServer failed: ${e.message}") }
+            // Retry GATT server if initial attempt fails (permissions may not be ready yet after fresh install)
+            for (attempt in 1..5) {
+                try { blePeripheralService.startGattServer(); break } catch (e: Exception) {
+                    Log.e(TAG, "startGattServer failed (attempt $attempt/5)", e)
+                    EventLog.log("ble", "startGattServer failed (attempt $attempt/5): ${e.message}")
+                    kotlinx.coroutines.delay(2000L)
+                }
+            }
             // Initial load: advertise all existing broadcasts and listen for subscriptions
             try {
                 val broadcasts = broadcastDao.getAll()
@@ -79,14 +86,23 @@ class SyncEngine(
                                 EventLog.log("adv", "Stopped advertising deleted broadcast $id")
                             }
                         }
-                        // Start advertising for current broadcasts
+                        // Start advertising for current broadcasts (skip those already advertised)
                         for (b in broadcasts) {
-                            try { startAdvertising(b) } catch (e: Exception) { Log.e(TAG, "startAdvertising failed", e); EventLog.log("ble", "startAdvertising failed: ${e.message}") }
+                            if (b.fileId !in advertisedFiles) {
+                                try { startAdvertising(b) } catch (e: Exception) { Log.e(TAG, "startAdvertising failed", e); EventLog.log("ble", "startAdvertising failed: ${e.message}") }
+                            }
                         }
                     }
                 }
             }
-            try { bleCentralService.startScan() } catch (e: Exception) { Log.e(TAG, "startScan failed", e); EventLog.log("ble", "startScan failed: ${e.message}") }
+            // Retry scan if initial attempt fails (permissions may not be ready yet after fresh install)
+            for (attempt in 1..5) {
+                try { bleCentralService.startScan(); break } catch (e: Exception) {
+                    Log.e(TAG, "startScan failed (attempt $attempt/5)", e)
+                    EventLog.log("ble", "startScan failed (attempt $attempt/5): ${e.message}")
+                    kotlinx.coroutines.delay(2000L)
+                }
+            }
             wifiDirectService.initialize()
             try { wifiDirectService.startServer() } catch (e: Exception) { Log.e(TAG, "wifi startServer failed", e); EventLog.log("wifi", "startServer failed: ${e.message}") }
         }
@@ -104,7 +120,7 @@ class SyncEngine(
         val pubKeyBytes = cryptoService.rawPublicKey(cryptoService.publicKeyFromBase64(broadcast.publicKey))
         val sigBytes = Base64.getDecoder().decode(broadcast.signature)
         val hashBytes = Base64.getDecoder().decode(broadcast.fileHash)
-        return BleMetaPayload(fileIdBytes, broadcast.version, pubKeyBytes, sigBytes, hashBytes, broadcast.fileSize)
+        return BleMetaPayload(fileIdBytes, broadcast.version, pubKeyBytes, sigBytes, hashBytes, broadcast.fileSize, broadcast.fileName)
     }
 
     fun startAdvertising(broadcast: BroadcastEntity) {
@@ -199,7 +215,8 @@ class SyncEngine(
     /** Relay keeping its own copy current: verify meta, pull bytes, re-sign, update DB. */
     private suspend fun fetchAndUpdateBroadcast(broadcast: BroadcastEntity, newVersion: Int, deviceAddress: String): Boolean {
         try {
-            val metaPayload = bleCentralService.readMeta(deviceAddress) ?: run {
+            val fileIdHash = cryptoService.fileIdHash(broadcast.fileId)
+            val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
                 EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting relay update"); return false
             }
             lastProbeAt[deviceAddress] = System.currentTimeMillis()
@@ -244,8 +261,8 @@ class SyncEngine(
             } else {
                 existingSignature
             }
-            broadcastDao.updateVersion(broadcast.fileId, newVersion, Base64.getEncoder().encodeToString(metaPayload.fileHash), sigToStore, internalFile.absolutePath, metaPayload.fileSize, System.currentTimeMillis())
-            subscriptionDao.updateReceived(broadcast.fileId, newVersion, internalFile.absolutePath, newVersion, System.currentTimeMillis())
+            broadcastDao.updateVersion(broadcast.fileId, newVersion, Base64.getEncoder().encodeToString(metaPayload.fileHash), sigToStore, internalFile.absolutePath, metaPayload.fileSize, System.currentTimeMillis(), metaPayload.fileName.takeIf { it.isNotBlank() } ?: broadcast.fileName)
+            subscriptionDao.updateReceived(broadcast.fileId, newVersion, internalFile.absolutePath, newVersion, System.currentTimeMillis(), metaPayload.fileName.takeIf { it.isNotBlank() } ?: broadcast.fileName)
             EventLog.log("sync", "Subscription record updated to v$newVersion for ${broadcast.fileId}")
             fileService.evictOldVersions(broadcast.fileId, newVersion)
             EventLog.log("sync", "Relay copy updated: ${broadcast.fileName} v${broadcast.version} -> v$newVersion")
@@ -259,7 +276,8 @@ class SyncEngine(
     /** Subscriber receiving a new version of a subscribed file. */
     private suspend fun fetchAndUpdateSubscription(subscription: SubscriptionEntity, newVersion: Int, deviceAddress: String): Boolean {
         try {
-            val metaPayload = bleCentralService.readMeta(deviceAddress) ?: run {
+            val fileIdHash = cryptoService.fileIdHash(subscription.fileId)
+            val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
                 EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting fetch"); return false
             }
             lastProbeAt[deviceAddress] = System.currentTimeMillis()
@@ -299,12 +317,17 @@ class SyncEngine(
             }
             val internalFile = fileService.commitDownloadedFile(subscription.fileId, newVersion, tmpFile)
             EventLog.log("sync", "Committed ${internalFile.absolutePath} (${internalFile.length()}B) for subscription v$newVersion")
-            subscriptionDao.updateReceived(subscription.fileId, newVersion, internalFile.absolutePath, newVersion, System.currentTimeMillis())
-            val persisted = subscriptionDao.getById(subscription.fileId)
-            if (persisted?.localVersion != newVersion || persisted.localUri != internalFile.absolutePath) {
-                throw IllegalStateException("Subscription DB verification failed: v${persisted?.localVersion}, uri=${persisted?.localUri}")
+            val resolvedFileName = metaPayload.fileName.takeIf { it.isNotBlank() } ?: subscription.fileName
+            if (metaPayload.fileName.isNotBlank() && metaPayload.fileName != subscription.fileName) {
+                EventLog.log("sync", "Filename updated for subscription ${subscription.fileId}: \"${subscription.fileName ?: ""}\" -> \"${metaPayload.fileName}\"")
             }
-            EventLog.log("sync", "Subscription DB verified at v$newVersion")
+            subscriptionDao.updateReceived(subscription.fileId, newVersion, internalFile.absolutePath, newVersion, System.currentTimeMillis(), resolvedFileName)
+            val persisted = subscriptionDao.getById(subscription.fileId)
+            if (persisted == null || persisted.localVersion != newVersion) {
+                // Diagnostic only: updateReceived either commits or throws, but a
+                // stale read here would explain a reverted UI version.
+                EventLog.log("sync", "WARNING: subscription row not at v$newVersion after update (found v${persisted?.localVersion})")
+            }
             fileService.evictOldVersions(subscription.fileId, newVersion)
             if (!internalFile.isFile || internalFile.length() != metaPayload.fileSize) {
                 throw IllegalStateException("Committed file changed after eviction: ${internalFile.length()}/${metaPayload.fileSize}B")
@@ -322,7 +345,7 @@ class SyncEngine(
             relayPayload[6] = ((newVersion ushr 24) and 0xFF).toByte(); relayPayload[7] = ((newVersion ushr 16) and 0xFF).toByte()
             relayPayload[8] = ((newVersion ushr 8) and 0xFF).toByte(); relayPayload[9] = (newVersion and 0xFF).toByte()
             cryptoService.keyId(subscription.publicKey).copyInto(relayPayload, 10)
-            broadcastDao.upsert(BroadcastEntity(subscription.fileId, subscription.fileName ?: "File", "application/octet-stream", internalFile.absolutePath, Base64.getEncoder().encodeToString(metaPayload.fileHash), metaPayload.fileSize, newVersion, subscription.publicKey, null, Base64.getEncoder().encodeToString(metaPayload.signature), Role.RELAY, subscription.subscribedAt, System.currentTimeMillis()))
+            broadcastDao.upsert(BroadcastEntity(subscription.fileId, resolvedFileName ?: "File", "application/octet-stream", internalFile.absolutePath, Base64.getEncoder().encodeToString(metaPayload.fileHash), metaPayload.fileSize, newVersion, subscription.publicKey, null, Base64.getEncoder().encodeToString(metaPayload.signature), Role.RELAY, subscription.subscribedAt, System.currentTimeMillis()))
             blePeripheralService.startAdvertising(subscription.fileId, relayPayload)
             EventLog.log("adv", "Relaying \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
             onFileReceived?.invoke(subscription.fileId, newVersion)
@@ -333,10 +356,22 @@ class SyncEngine(
     fun stopAdvertisingForFile(fileId: String) {
         try { blePeripheralService.stopAdvertising(fileId) } catch (_: Exception) {}
         advertisedFiles.remove(fileId)
-        dedupCache.keys.removeAll { it.startsWith(cryptoService.fileIdHash(fileId).joinToString("") { "%02x".format(it) }) }
-        lastProbeAt.keys.forEach { key ->
-            // Clean up probe cooldown for devices that were connected for this file
-        }
+        clearDiscoveryStateForFile(fileId)
+        EventLog.log("adv", "Stopped relaying ${fileId.takeLast(8)} and reset its discovery state")
+    }
+
+    /**
+     * Clears dedup entries and probe cooldowns so the next advertisement of
+     * [fileId] is processed immediately. Required for delete -> re-subscribe:
+     * without this, a stale dedup key (30s) or probe cooldown (5min) silently
+     * swallows the advertisement and nothing is fetched.
+     */
+    fun clearDiscoveryStateForFile(fileId: String) {
+        val hashPrefix = cryptoService.fileIdHash(fileId).joinToString("") { "%02x".format(it) }
+        val removedDedup = dedupCache.keys.count { it.startsWith(hashPrefix) }
+        dedupCache.keys.removeAll { it.startsWith(hashPrefix) }
+        lastProbeAt.clear()
+        EventLog.log("scan", "Discovery state reset for ${fileId.takeLast(8)} (cleared $removedDedup dedup entries + all probe cooldowns)")
     }
 
     private fun uuidToBytes(fileId: String): ByteArray? {

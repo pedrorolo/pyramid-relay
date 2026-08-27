@@ -7,7 +7,7 @@ class ModelsTest {
 
     @Test
     fun `spec 8 - BLE META_CHAR payload is 152 bytes`() {
-        assertEquals(152, BleMetaPayload.SIZE)
+        assertEquals(152, BleMetaPayload.FIXED_SIZE - 2) // legacy fixed size minus the new nameLen field
     }
 
     @Test
@@ -19,10 +19,11 @@ class ModelsTest {
         val fileHash = ByteArray(32) { (it + 30).toByte() }
         val fileSize = 1024L
 
-        val payload = BleMetaPayload(fileId, version, publicKey, signature, fileHash, fileSize)
+        val payload = BleMetaPayload(fileId, version, publicKey, signature, fileHash, fileSize, "test.bin")
         val bytes = payload.toBytes()
 
-        assertEquals(152, bytes.size)
+        // Fixed prefix (no name) = 154 bytes; + 8B name = 162
+        assertEquals(BleMetaPayload.FIXED_SIZE + 8, bytes.size)
 
         var offset = 0
         assertArrayEquals(fileId, bytes.copyOfRange(offset, offset + 16)); offset += 16
@@ -49,7 +50,7 @@ class ModelsTest {
         val fileHash = ByteArray(32) { (it * 4).toByte() }
         val fileSize = 123456789L
 
-        val payload = BleMetaPayload(fileId, version, publicKey, signature, fileHash, fileSize)
+        val payload = BleMetaPayload(fileId, version, publicKey, signature, fileHash, fileSize, "report.pdf")
         val restored = BleMetaPayload.fromBytes(payload.toBytes())!!
 
         assertArrayEquals(fileId, restored.fileId)
@@ -58,18 +59,22 @@ class ModelsTest {
         assertArrayEquals(signature, restored.signature)
         assertArrayEquals(fileHash, restored.fileHash)
         assertEquals(fileSize, restored.fileSize)
+        assertEquals("report.pdf", restored.fileName)
     }
 
     @Test
     fun `spec 8 - BleMetaPayload fromBytes rejects short data`() {
         assertNull(BleMetaPayload.fromBytes(ByteArray(10)))
         assertNull(BleMetaPayload.fromBytes(ByteArray(0)))
-        assertNull(BleMetaPayload.fromBytes(ByteArray(151)))
+        assertNull(BleMetaPayload.fromBytes(ByteArray(BleMetaPayload.FIXED_SIZE - 1)))
+        // Declares 8 bytes of name but buffer only has 4 trailing bytes
+        val shortName = ByteArray(BleMetaPayload.FIXED_SIZE + 4).also { it[BleMetaPayload.FIXED_SIZE - 2] = 0; it[BleMetaPayload.FIXED_SIZE - 1] = 8 }
+        assertNull(BleMetaPayload.fromBytes(shortName))
     }
 
     @Test
     fun `spec 8 - BleMetaPayload version BE32 encoding roundtrip`() {
-        val payload = BleMetaPayload(ByteArray(16), 0x01020304, ByteArray(32), ByteArray(64), ByteArray(32), 0)
+        val payload = BleMetaPayload(ByteArray(16), 0x01020304, ByteArray(32), ByteArray(64), ByteArray(32), 0, "f")
         val bytes = payload.toBytes()
         val restored = BleMetaPayload.fromBytes(bytes)!!
         assertEquals(0x01020304, restored.version)
@@ -77,7 +82,7 @@ class ModelsTest {
 
     @Test
     fun `spec 8 - BleMetaPayload fileSize BE32 encoding for max size`() {
-        val maxFile = BleMetaPayload(ByteArray(16), 1, ByteArray(32), ByteArray(64), ByteArray(32), MAX_FILE_SIZE)
+        val maxFile = BleMetaPayload(ByteArray(16), 1, ByteArray(32), ByteArray(64), ByteArray(32), MAX_FILE_SIZE, "f")
         val bytes = maxFile.toBytes()
         val restored = BleMetaPayload.fromBytes(bytes)!!
         assertEquals(MAX_FILE_SIZE, restored.fileSize)
@@ -229,8 +234,8 @@ class ModelsTest {
 
     @Test
     fun `spec 8 - BleMetaPayload equality with contentEquals`() {
-        val p1 = BleMetaPayload(ByteArray(16), 1, ByteArray(32), ByteArray(64), ByteArray(32), 100)
-        val p2 = BleMetaPayload(ByteArray(16), 1, ByteArray(32), ByteArray(64), ByteArray(32), 100)
+        val p1 = BleMetaPayload(ByteArray(16), 1, ByteArray(32), ByteArray(64), ByteArray(32), 100, "x")
+        val p2 = BleMetaPayload(ByteArray(16), 1, ByteArray(32), ByteArray(64), ByteArray(32), 100, "x")
         assertEquals(p1, p2)
         assertEquals(p1.hashCode(), p2.hashCode())
     }

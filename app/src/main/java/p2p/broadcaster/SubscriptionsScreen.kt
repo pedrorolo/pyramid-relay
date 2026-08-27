@@ -2,6 +2,7 @@ package p2p.broadcaster
 
 import android.content.Intent
 import android.net.Uri
+import java.util.Base64
 import p2p.broadcaster.EventLog
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -40,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -85,6 +87,10 @@ class SubscriptionsViewModel(
                         System.currentTimeMillis(), null, null, null
                     )
                 )
+                // A fresh subscription must hear the next advertisement of this
+                // file immediately: stale dedup/probe-cooldown state from a
+                // previous subscription of the same file would swallow it.
+                syncEngine?.clearDiscoveryStateForFile(fileId)
                 EventLog.log("sub", "Subscribed to \"${name ?: fileId.takeLast(8)}\" - listening for new versions")
             } catch (e: Exception) {
                 EventLog.log("sub", "Failed to subscribe to ${fileId.takeLast(8)}: ${e.message}")
@@ -94,10 +100,12 @@ class SubscriptionsViewModel(
 
     fun deleteSubscription(subscription: SubscriptionEntity) {
         viewModelScope.launch {
+            EventLog.log("sub", "Deleting subscription \"${subscription.fileName ?: subscription.fileId.takeLast(8)}\" (local v${subscription.localVersion})")
             syncEngine?.stopAdvertisingForFile(subscription.fileId)
             fileService.deleteAll(subscription.fileId)
             subscriptionDao.delete(subscription.fileId)
             broadcastDao.delete(subscription.fileId)
+            EventLog.log("sub", "Deleted subscription ${subscription.fileId.takeLast(8)} - relay stopped, files removed")
         }
     }
 }
@@ -110,6 +118,7 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
     val subscriptions by viewModel.subscriptions.collectAsState()
     var showPasteDialog by remember { mutableStateOf(false) }
     var showQrScan by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf<SubscriptionEntity?>(null) }
 
     if (initialFileId != null && initialPk != null) {
         var added by remember { mutableStateOf(false) }
@@ -133,21 +142,21 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
                     items(subscriptions, key = { it.fileId }) { subscription ->
                         SubscriptionRow(
                             subscription = subscription,
-                            onDelete = { viewModel.deleteSubscription(subscription) }
+                            onDelete = { showDeleteConfirm = subscription }
                         )
                     }
                 }
             }
             Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { showQrScan = true }, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = null)
-                    Spacer(modifier = Modifier.padding(4.dp))
-                    Text("Scan QR")
-                }
                 OutlinedButton(onClick = { showPasteDialog = true }, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.ContentCopy, contentDescription = null)
                     Spacer(modifier = Modifier.padding(4.dp))
                     Text("Paste Link")
+                }
+                Button(onClick = { showQrScan = true }, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Default.CameraAlt, contentDescription = null)
+                    Spacer(modifier = Modifier.padding(4.dp))
+                    Text("Scan QR")
                 }
             }
         }
@@ -169,6 +178,21 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
                 viewModel.addSubscription(fileId, pk, name)
                 showQrScan = false
             }
+        )
+    }
+
+    showDeleteConfirm?.let { subscription ->
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = null },
+            title = { Text("Delete subscription?") },
+            text = { Text("Permanently delete \"${subscription.fileName ?: subscription.fileId.takeLast(8)}\"? This will stop relaying and remove all local files.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirm = null
+                    viewModel.deleteSubscription(subscription)
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { showDeleteConfirm = null }) { Text("Cancel") } }
         )
     }
 }
@@ -221,7 +245,20 @@ fun SubscriptionRow(subscription: SubscriptionEntity, onDelete: () -> Unit) {
             Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
             Spacer(modifier = Modifier.height(8.dp))
             Row {
+                val clipboardManager = LocalClipboardManager.current
                 IconButton(onClick = { showQr = true }) { Icon(Icons.Default.QrCode, contentDescription = "Share QR") }
+                IconButton(onClick = {
+                    val pkBytes = try {
+                        Base64.getDecoder().decode(subscription.publicKey)
+                    } catch (e: Exception) {
+                        Base64.getUrlDecoder().decode(subscription.publicKey)
+                    }
+                    val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
+                    val nameEnc = java.net.URLEncoder.encode(subscription.fileName ?: "", "UTF-8")
+                    val link = "p2pbroadcaster://subscribe?fileId=${subscription.fileId}&pk=$pkUrl&name=$nameEnc&v=${subscription.localVersion ?: subscription.lastSeenVersion ?: 1}"
+                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(link))
+                    EventLog.log("app", "Link copied to clipboard")
+                }) { Icon(Icons.Default.ContentCopy, contentDescription = "Copy Link") }
                 if (subscription.localVersion != null) {
                     IconButton(onClick = {
                         saveLauncher.launch(subscription.fileName ?: "file.bin")

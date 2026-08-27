@@ -87,7 +87,7 @@ class ServiceCoverageTest {
         val service = BlePeripheralService(context)
 
         service.setMetaPayloadProvider { fileId ->
-            BleMetaPayload(ByteArray(16), 1, ByteArray(32), ByteArray(64), ByteArray(32), 1024L)
+            BleMetaPayload(ByteArray(16), 1, ByteArray(32), ByteArray(64), ByteArray(32), 1024L, "test.bin")
         }
 
         service.startGattServer()

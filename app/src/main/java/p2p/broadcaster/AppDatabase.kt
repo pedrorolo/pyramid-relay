@@ -103,10 +103,11 @@ class BroadcastDao(private val db: AppDatabase) {
         notifyChange()
     }
 
-    suspend fun updateVersion(fileId: String, version: Int, fileHash: String, sig: String, uri: String, size: Long, now: Long) = withContext(Dispatchers.IO) {
+    suspend fun updateVersion(fileId: String, version: Int, fileHash: String, sig: String, uri: String, size: Long, now: Long, fileName: String? = null) = withContext(Dispatchers.IO) {
         val cv = ContentValues().apply {
             put("version", version); put("fileHash", fileHash); put("signature", sig)
             put("internalUri", uri); put("fileSize", size); put("updatedAt", now)
+            if (fileName != null) put("fileName", fileName)
         }
         db.writableDatabase.update("broadcasts", cv, "fileId=?", arrayOf(fileId))
         notifyChange()
@@ -164,10 +165,11 @@ class SubscriptionDao(private val db: AppDatabase) {
         notifyChange()
     }
 
-    suspend fun updateReceived(fileId: String, localVersion: Int, localUri: String, lastSeen: Int, now: Long) = withContext(Dispatchers.IO) {
+    suspend fun updateReceived(fileId: String, localVersion: Int, localUri: String, lastSeen: Int, now: Long, fileName: String? = null) = withContext(Dispatchers.IO) {
         val cv = ContentValues().apply {
             put("localVersion", localVersion); put("localUri", localUri)
             put("lastSeenVersion", lastSeen); put("lastSeenAt", now)
+            if (fileName != null) put("fileName", fileName)
         }
         db.writableDatabase.update("subscriptions", cv, "fileId=?", arrayOf(fileId))
         notifyChange()

@@ -56,7 +56,7 @@ class FinalCoverageTest {
         val notificationService = mockk<NotificationService>(relaxed = true)
         every { broadcastDao.changeFlow } returns MutableStateFlow(0L)
         every { subscriptionDao.changeFlow } returns MutableStateFlow(0L)
-        coEvery { bleCentralService.readMeta(any()) } returns null
+        coEvery { bleCentralService.readMeta(any(), any()) } returns null
 
         val engine = SyncEngine(
             broadcastDao, subscriptionDao, cryptoService, fileService,
@@ -79,7 +79,7 @@ class FinalCoverageTest {
         engine.handleDiscoveredDevice("AA:BB:CC:DD:EE:FF", serviceData)
         advanceUntilIdle()
 
-        coVerify(exactly = 1) { bleCentralService.readMeta("AA:BB:CC:DD:EE:FF") }
+        coVerify(exactly = 1) { bleCentralService.readMeta("AA:BB:CC:DD:EE:FF", any()) }
     }
 
     @Test
@@ -94,7 +94,7 @@ class FinalCoverageTest {
         val notificationService = mockk<NotificationService>(relaxed = true)
         every { broadcastDao.changeFlow } returns MutableStateFlow(0L)
         every { subscriptionDao.changeFlow } returns MutableStateFlow(0L)
-        coEvery { bleCentralService.readMeta(any()) } returns null
+        coEvery { bleCentralService.readMeta(any(), any()) } returns null
 
         val engine = SyncEngine(
             broadcastDao, subscriptionDao, cryptoService, fileService,
@@ -118,7 +118,7 @@ class FinalCoverageTest {
         engine.handleDiscoveredDevice("AA:BB:CC:DD:EE:FF", serviceData)
         advanceUntilIdle()
 
-        coVerify(exactly = 1) { bleCentralService.readMeta("AA:BB:CC:DD:EE:FF") }
+        coVerify(exactly = 1) { bleCentralService.readMeta("AA:BB:CC:DD:EE:FF", any()) }
     }
 
     @Test
