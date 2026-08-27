@@ -48,7 +48,7 @@ class BroadcastsViewModel(
     private val broadcastDao: BroadcastDao,
     private val cryptoService: CryptoService,
     private val fileService: FileService,
-    private val syncEngine: SyncEngine
+    private val syncEngine: SyncEngine? = null
 ) : ViewModel() {
     private val _broadcasts = MutableStateFlow<List<BroadcastEntity>>(emptyList())
     val broadcasts: StateFlow<List<BroadcastEntity>> = _broadcasts.asStateFlow()
@@ -96,7 +96,7 @@ class BroadcastsViewModel(
 
     fun deleteBroadcast(broadcast: BroadcastEntity) {
         viewModelScope.launch {
-            syncEngine.stopAdvertisingForFile(broadcast.fileId)
+            syncEngine?.stopAdvertisingForFile(broadcast.fileId)
             fileService.deleteAll(broadcast.fileId)
             broadcastDao.delete(broadcast.fileId)
         }
@@ -134,7 +134,7 @@ class BroadcastsViewModel(
             val signature = cryptoService.sign(msg, privateKey)
             val signatureStr = Base64.getEncoder().encodeToString(signature)
             EventLog.log("adv", "updateBroadcast: stopping old advertisement")
-            syncEngine.stopAdvertisingForFile(broadcast.fileId)
+            syncEngine?.stopAdvertisingForFile(broadcast.fileId)
             EventLog.log("adv", "updateBroadcast: updating DB version to v$newVersion")
             broadcastDao.updateVersion(broadcast.fileId, newVersion, hashStr, signatureStr, file.absolutePath, fileBytes.size.toLong(), System.currentTimeMillis())
             EventLog.log("adv", "updateBroadcast: DB updated, evicting old versions")

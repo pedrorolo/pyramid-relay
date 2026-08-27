@@ -131,7 +131,6 @@ class SyncEngine(
         val fileIdHash = serviceData.copyOfRange(0, 6)
         val version = ((serviceData[6].toInt() and 0xFF) shl 24) or ((serviceData[7].toInt() and 0xFF) shl 16) or ((serviceData[8].toInt() and 0xFF) shl 8) or (serviceData[9].toInt() and 0xFF)
         val keyId = serviceData.copyOfRange(10, 14)
-        EventLog.log("scan", "Heard advertisement v$version from ${deviceAddress.takeLast(5)}")
         val dedupKey = "${fileIdHash.joinToString("") { "%02x".format(it) }}:$version"
         val now = System.currentTimeMillis()
         dedupCache[dedupKey]?.let { if (now - it < DEDUP_TTL_MS) { return false } }
@@ -212,22 +211,42 @@ class SyncEngine(
                 Log.e(TAG, "Sig verify failed ${broadcast.fileId}"); return false
             }
             EventLog.log("gatt", "Meta verified for ${broadcast.fileName} v$newVersion")
-            val tmpFile = fileService.getTmpFile(broadcast.fileId, newVersion); tmpFile.parentFile?.mkdirs()
+            val tmpFile = fileService.getTmpFile(broadcast.fileId, newVersion)
+            tmpFile.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IllegalStateException("Cannot create temporary download directory") }
             EventLog.log("ble", "Streaming ${broadcast.fileId} v$newVersion (${metaPayload.fileSize}B) over GATT")
-            val transferred = try { bleCentralService.fetchFile(deviceAddress, newVersion, metaPayload.fileSize, tmpFile.outputStream()) } catch (e: Exception) {
+            val transferred = try {
+                tmpFile.outputStream().use { output ->
+                    bleCentralService.fetchFile(deviceAddress, newVersion, metaPayload.fileSize, output)
+                }
+            } catch (e: Exception) {
                 EventLog.log("ble", "fetchFile error: ${e.message}"); false
             }
             if (!transferred) { tmpFile.delete(); EventLog.log("wifi", "Transfer failed for ${broadcast.fileId}"); return false }
+            if (!tmpFile.isFile || tmpFile.length() != metaPayload.fileSize) {
+                EventLog.log("sync", "Downloaded file size mismatch for ${broadcast.fileId}: ${tmpFile.length()}/${metaPayload.fileSize}B")
+                tmpFile.delete(); return false
+            }
             val receivedHash = cryptoService.sha256Hex(tmpFile.readBytes())
             if (receivedHash != hashHex) {
                 tmpFile.delete(); EventLog.log("sync", "Hash mismatch after transfer of ${broadcast.fileId} - discarded")
                 return false
             }
-            val internalFile = fileService.getFile(broadcast.fileId, newVersion); tmpFile.renameTo(internalFile)
-            val privateKey = cryptoService.getPrivateKey(broadcast.privateKeyAlias!!)
-                ?: throw IllegalStateException("Private key not found for ${broadcast.fileId}")
-            val newSignature = Base64.getEncoder().encodeToString(cryptoService.sign(cryptoService.buildSignatureMessage(broadcast.fileId, newVersion, receivedHash), privateKey))
-            broadcastDao.updateVersion(broadcast.fileId, newVersion, Base64.getEncoder().encodeToString(metaPayload.fileHash), newSignature, internalFile.absolutePath, metaPayload.fileSize, System.currentTimeMillis())
+            val internalFile = fileService.commitDownloadedFile(broadcast.fileId, newVersion, tmpFile)
+            val existingSignature = Base64.getEncoder().encodeToString(metaPayload.signature)
+            val privateKeyAlias = broadcast.privateKeyAlias
+            val sigToStore = if (privateKeyAlias != null) {
+                val privateKey = cryptoService.getPrivateKey(privateKeyAlias)
+                if (privateKey != null) {
+                    Base64.getEncoder().encodeToString(cryptoService.sign(cryptoService.buildSignatureMessage(broadcast.fileId, newVersion, receivedHash), privateKey))
+                } else {
+                    existingSignature
+                }
+            } else {
+                existingSignature
+            }
+            broadcastDao.updateVersion(broadcast.fileId, newVersion, Base64.getEncoder().encodeToString(metaPayload.fileHash), sigToStore, internalFile.absolutePath, metaPayload.fileSize, System.currentTimeMillis())
+            subscriptionDao.updateReceived(broadcast.fileId, newVersion, internalFile.absolutePath, newVersion, System.currentTimeMillis())
+            EventLog.log("sync", "Subscription record updated to v$newVersion for ${broadcast.fileId}")
             fileService.evictOldVersions(broadcast.fileId, newVersion)
             EventLog.log("sync", "Relay copy updated: ${broadcast.fileName} v${broadcast.version} -> v$newVersion")
             notificationService.showUpdateNotification(broadcast.fileName, broadcast.fileId, broadcast.version, newVersion)
@@ -258,20 +277,39 @@ class SyncEngine(
                 return false
             }
             EventLog.log("gatt", "Meta verified for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
-            val tmpFile = fileService.getTmpFile(subscription.fileId, newVersion); tmpFile.parentFile?.mkdirs()
+            val tmpFile = fileService.getTmpFile(subscription.fileId, newVersion)
+            tmpFile.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IllegalStateException("Cannot create temporary download directory") }
             EventLog.log("ble", "Streaming ${subscription.fileId} v$newVersion (${metaPayload.fileSize}B) over GATT")
-            val transferred = try { bleCentralService.fetchFile(deviceAddress, newVersion, metaPayload.fileSize, tmpFile.outputStream()) } catch (e: Exception) {
+            val transferred = try {
+                tmpFile.outputStream().use { output ->
+                    bleCentralService.fetchFile(deviceAddress, newVersion, metaPayload.fileSize, output)
+                }
+            } catch (e: Exception) {
                 EventLog.log("ble", "fetchFile error: ${e.message}"); false
             }
             if (!transferred) { tmpFile.delete(); EventLog.log("wifi", "Transfer failed for ${subscription.fileId}"); return false }
+            if (!tmpFile.isFile || tmpFile.length() != metaPayload.fileSize) {
+                EventLog.log("sync", "Downloaded file size mismatch for ${subscription.fileId}: ${tmpFile.length()}/${metaPayload.fileSize}B")
+                tmpFile.delete(); return false
+            }
             val receivedHash = cryptoService.sha256Hex(tmpFile.readBytes())
             if (receivedHash != hashHex) {
                 tmpFile.delete(); EventLog.log("sync", "Hash mismatch after transfer of ${subscription.fileId} - discarded")
                 return false
             }
-            val internalFile = fileService.getFile(subscription.fileId, newVersion); tmpFile.renameTo(internalFile)
+            val internalFile = fileService.commitDownloadedFile(subscription.fileId, newVersion, tmpFile)
+            EventLog.log("sync", "Committed ${internalFile.absolutePath} (${internalFile.length()}B) for subscription v$newVersion")
             subscriptionDao.updateReceived(subscription.fileId, newVersion, internalFile.absolutePath, newVersion, System.currentTimeMillis())
+            val persisted = subscriptionDao.getById(subscription.fileId)
+            if (persisted?.localVersion != newVersion || persisted.localUri != internalFile.absolutePath) {
+                throw IllegalStateException("Subscription DB verification failed: v${persisted?.localVersion}, uri=${persisted?.localUri}")
+            }
+            EventLog.log("sync", "Subscription DB verified at v$newVersion")
             fileService.evictOldVersions(subscription.fileId, newVersion)
+            if (!internalFile.isFile || internalFile.length() != metaPayload.fileSize) {
+                throw IllegalStateException("Committed file changed after eviction: ${internalFile.length()}/${metaPayload.fileSize}B")
+            }
+            EventLog.log("sync", "Old versions evicted; current file remains ${internalFile.length()}B")
             EventLog.log("sync", "Received \"${subscription.fileName ?: subscription.fileId}\" v$newVersion (${metaPayload.fileSize}B)")
             val shouldNotify = subscription.lastNotifiedVersion == null || subscription.lastNotifiedVersion < newVersion
             if (shouldNotify) {

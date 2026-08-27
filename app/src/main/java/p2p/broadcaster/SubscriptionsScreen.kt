@@ -54,7 +54,7 @@ class SubscriptionsViewModel(
     private val broadcastDao: BroadcastDao,
     private val fileService: FileService,
     private val cryptoService: CryptoService,
-    private val syncEngine: SyncEngine
+    private val syncEngine: SyncEngine? = null
 ) : ViewModel() {
     private val _subscriptions = MutableStateFlow<List<SubscriptionEntity>>(emptyList())
     val subscriptions: StateFlow<List<SubscriptionEntity>> = _subscriptions.asStateFlow()
@@ -94,7 +94,7 @@ class SubscriptionsViewModel(
 
     fun deleteSubscription(subscription: SubscriptionEntity) {
         viewModelScope.launch {
-            syncEngine.stopAdvertisingForFile(subscription.fileId)
+            syncEngine?.stopAdvertisingForFile(subscription.fileId)
             fileService.deleteAll(subscription.fileId)
             subscriptionDao.delete(subscription.fileId)
             broadcastDao.delete(subscription.fileId)
@@ -118,6 +118,26 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
 
     Scaffold { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (subscriptions.isEmpty()) {
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(32.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("No subscriptions yet", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Scan a QR code or paste a link to subscribe", style = MaterialTheme.typography.bodyMedium)
+                }
+            } else {
+                LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    items(subscriptions, key = { it.fileId }) { subscription ->
+                        SubscriptionRow(
+                            subscription = subscription,
+                            onDelete = { viewModel.deleteSubscription(subscription) }
+                        )
+                    }
+                }
+            }
             Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { showQrScan = true }, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.CameraAlt, contentDescription = null)
@@ -128,26 +148,6 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
                     Icon(Icons.Default.ContentCopy, contentDescription = null)
                     Spacer(modifier = Modifier.padding(4.dp))
                     Text("Paste Link")
-                }
-            }
-            if (subscriptions.isEmpty()) {
-                Column(
-                    modifier = Modifier.fillMaxSize().padding(32.dp),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text("No subscriptions yet", style = MaterialTheme.typography.titleMedium)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Scan a QR code or paste a link to subscribe", style = MaterialTheme.typography.bodyMedium)
-                }
-            } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(subscriptions, key = { it.fileId }) { subscription ->
-                        SubscriptionRow(
-                            subscription = subscription,
-                            onDelete = { viewModel.deleteSubscription(subscription) }
-                        )
-                    }
                 }
             }
         }
@@ -176,13 +176,17 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
 @Composable
 fun SubscriptionRow(subscription: SubscriptionEntity, onDelete: () -> Unit) {
     val context = LocalContext.current
+    val app = context.applicationContext as P2PBroadcasterApp
     var showQr by remember { mutableStateOf(false) }
     val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { destUri ->
-        if (destUri != null && subscription.localUri != null) {
+        if (destUri != null && subscription.localVersion != null) {
             try {
-                context.contentResolver.openOutputStream(destUri)?.use { out ->
-                    java.io.File(subscription.localUri).inputStream().use { it.copyTo(out) }
-                }
+                val source = app.fileService.getFile(subscription.fileId, subscription.localVersion)
+                EventLog.log("app", "Saving subscription ${subscription.fileId} v${subscription.localVersion} from ${source.absolutePath} (${source.length()}B)")
+                require(source.isFile && source.length() > 0) { "Downloaded file is missing or empty" }
+                val output = context.contentResolver.openOutputStream(destUri)
+                    ?: error("Cannot open destination")
+                output.use { out -> source.inputStream().use { it.copyTo(out) } }
                 EventLog.log("app", "File saved to ${destUri.lastPathSegment}")
             } catch (e: Exception) {
                 EventLog.log("app", "Failed to save file: ${e.message}")

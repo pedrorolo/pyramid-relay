@@ -20,6 +20,21 @@ class FileService(private val context: Context) {
     fun getFile(fileId: String, version: Int): File = File(getVersionDir(fileId, version), "file")
     fun getTmpFile(fileId: String, version: Int): File = File(getVersionDir(fileId, version), "file.tmp")
 
+    fun commitDownloadedFile(fileId: String, version: Int, tmpFile: File): File {
+        val versionDir = getVersionDir(fileId, version)
+        if (!versionDir.exists() && !versionDir.mkdirs()) {
+            throw IllegalStateException("Cannot create download directory: ${versionDir.absolutePath}")
+        }
+        val target = getFile(fileId, version)
+        if (target.exists() && !target.delete()) {
+            throw IllegalStateException("Cannot replace existing file: ${target.absolutePath}")
+        }
+        if (!tmpFile.renameTo(target)) {
+            throw IllegalStateException("Cannot commit downloaded file: ${tmpFile.absolutePath}")
+        }
+        return target
+    }
+
     fun importFile(fileId: String, version: Int, inputStream: InputStream, contentLength: Long?): String {
         if (contentLength != null && contentLength > MAX_FILE_SIZE)
             throw IllegalArgumentException("File too large for 5-minute GATT transfer (max 15MB)")
