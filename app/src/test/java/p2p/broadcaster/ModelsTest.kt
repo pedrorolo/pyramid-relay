@@ -19,7 +19,7 @@ class ModelsTest {
         val fileHash = ByteArray(32) { (it + 30).toByte() }
         val fileSize = 1024L
 
-        val payload = BleMetaPayload(fileId, version, publicKey, signature, fileHash, fileSize, "test.bin")
+        val payload = BleMetaPayload(fileId, version, signature, fileHash, fileSize, "test.bin")
         val bytes = payload.toBytes()
 
         // Fixed prefix (no name) = 154 bytes; + 8B name = 162
@@ -50,12 +50,11 @@ class ModelsTest {
         val fileHash = ByteArray(32) { (it * 4).toByte() }
         val fileSize = 123456789L
 
-        val payload = BleMetaPayload(fileId, version, publicKey, signature, fileHash, fileSize, "report.pdf")
+        val payload = BleMetaPayload(fileId, version, signature, fileHash, fileSize, "report.pdf")
         val restored = BleMetaPayload.fromBytes(payload.toBytes())!!
 
         assertArrayEquals(fileId, restored.fileId)
         assertEquals(version, restored.version)
-        assertArrayEquals(publicKey, restored.publicKey)
         assertArrayEquals(signature, restored.signature)
         assertArrayEquals(fileHash, restored.fileHash)
         assertEquals(fileSize, restored.fileSize)
@@ -74,7 +73,7 @@ class ModelsTest {
 
     @Test
     fun `spec 8 - BleMetaPayload version BE32 encoding roundtrip`() {
-        val payload = BleMetaPayload(ByteArray(16), 0x01020304, ByteArray(32), ByteArray(64), ByteArray(32), 0, "f")
+        val payload = BleMetaPayload(ByteArray(16), 0x01020304, ByteArray(64), ByteArray(32), 0, "f")
         val bytes = payload.toBytes()
         val restored = BleMetaPayload.fromBytes(bytes)!!
         assertEquals(0x01020304, restored.version)
@@ -82,7 +81,7 @@ class ModelsTest {
 
     @Test
     fun `spec 8 - BleMetaPayload fileSize BE32 encoding for max size`() {
-        val maxFile = BleMetaPayload(ByteArray(16), 1, ByteArray(32), ByteArray(64), ByteArray(32), MAX_FILE_SIZE, "f")
+        val maxFile = BleMetaPayload(ByteArray(16), 1, ByteArray(64), ByteArray(32), MAX_FILE_SIZE, "f")
         val bytes = maxFile.toBytes()
         val restored = BleMetaPayload.fromBytes(bytes)!!
         assertEquals(MAX_FILE_SIZE, restored.fileSize)
@@ -234,8 +233,8 @@ class ModelsTest {
 
     @Test
     fun `spec 8 - BleMetaPayload equality with contentEquals`() {
-        val p1 = BleMetaPayload(ByteArray(16), 1, ByteArray(32), ByteArray(64), ByteArray(32), 100, "x")
-        val p2 = BleMetaPayload(ByteArray(16), 1, ByteArray(32), ByteArray(64), ByteArray(32), 100, "x")
+        val p1 = BleMetaPayload(ByteArray(16), 1, ByteArray(64), ByteArray(32), 100, "x")
+        val p2 = BleMetaPayload(ByteArray(16), 1, ByteArray(64), ByteArray(32), 100, "x")
         assertEquals(p1, p2)
         assertEquals(p1.hashCode(), p2.hashCode())
     }

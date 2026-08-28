@@ -228,16 +228,12 @@ class PeerSyncIntegrationTest {
         // Simulate the GATT transfer: serialize on A, deserialize on B
         val parsed = BleMetaPayload.fromBytes(engineA.buildMetaPayload(entity.fileId)!!.toBytes())!!
 
-        assertArrayEquals(cryptoA.rawPublicKey(kp.public), parsed.publicKey)
         assertEquals(entity.version, parsed.version)
         assertArrayEquals(cryptoA.sha256(content), parsed.fileHash)
         assertEquals(content.size.toLong(), parsed.fileSize)
 
-        // Reconstruct the X509 public key from the 32-byte wire form (as B does),
-        // rebuild the exact signed message and verify with B's own CryptoService.
-        // The signed message binds the CANONICAL UUID string (as known from the
-        // subscription), not a UTF-8 decode of the 16 wire bytes.
-        val reconstructedPubKey = cryptoB.publicKeyFromRaw(parsed.publicKey)
+        // Public key is not in META payload - use the subscription's public key
+        val reconstructedPubKey = cryptoB.publicKeyFromBase64(entity.publicKey)
         val hashHex = parsed.fileHash.joinToString("") { "%02x".format(it) }
         val msg = cryptoB.buildSignatureMessage(entity.fileId, parsed.version, hashHex)
         assertTrue(cryptoB.verify(msg, parsed.signature, reconstructedPubKey))
@@ -315,7 +311,7 @@ class PeerSyncIntegrationTest {
         val attackerSig = cryptoB.sign(cryptoB.buildSignatureMessage(entity.fileId, entity.version, hashHex), attackerKp.private)
         val forgedPayload = BleMetaPayload(
             uuidToBytesUnchecked(entity.fileId), entity.version,
-            cryptoB.rawPublicKey(attackerKp.public), attackerSig,
+            attackerSig,
             cryptoB.sha256(content), content.size.toLong(),
             entity.fileName ?: "file"
         )
@@ -336,7 +332,7 @@ class PeerSyncIntegrationTest {
 
         // Correct publisher key, corrupted signature over the claimed version/hash
         val good = gattReadFromA()!!
-        val bad = BleMetaPayload(good.fileId, good.version, good.publicKey, good.signature.copyOf().also { it[10]++ }, good.fileHash, good.fileSize, good.fileName)
+        val bad = BleMetaPayload(good.fileId, good.version, good.signature.copyOf().also { it[10]++ }, good.fileHash, good.fileSize, good.fileName)
         coEvery { bleCentralB.readMeta(any(), any()) } returns bad
 
         assertFalse(engineB.handleDiscoveredDevice("AA:BB:CC:DD:EE:06", advertisementsA[entity.fileId]!!))

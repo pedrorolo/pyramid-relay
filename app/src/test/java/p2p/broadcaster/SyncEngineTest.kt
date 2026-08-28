@@ -84,10 +84,7 @@ class SyncEngineTest {
         assertEquals(16, payload.fileId.size)
         assertEquals(1, payload.version)
         assertEquals(1024L, payload.fileSize)
-        // Raw Ed25519 point (32 bytes), not the 44-byte X.509 wrapper - it must fit
-        // the fixed BleMetaPayload slot without overrunning the signature field.
-        assertEquals(32, payload.publicKey.size)
-        assertArrayEquals(cryptoService.rawPublicKey(kp.public), payload.publicKey)
+        // Public key is no longer in META payload - only signature, fileHash, fileName
         assertEquals(64, payload.signature.size)
         assertEquals(32, payload.fileHash.size)
     }
@@ -469,7 +466,6 @@ class SyncEngineTest {
         // probe (readMeta) happens and sets the cooldown, then verification fails.
         val meta = BleMetaPayload(
             uuidBytes(fileId), 1,
-            cryptoService.rawPublicKey(kp.public),
             ByteArray(64),
             cryptoService.sha256("data".toByteArray()),
             4L,

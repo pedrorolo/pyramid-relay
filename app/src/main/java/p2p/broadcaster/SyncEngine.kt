@@ -175,10 +175,9 @@ class SyncEngine(
     suspend fun buildMetaPayload(fileId: String): BleMetaPayload? {
         val broadcast = broadcastDao.getById(fileId) ?: return null
         val fileIdBytes = uuidToBytes(fileId) ?: return null
-        val pubKeyBytes = cryptoService.rawPublicKey(cryptoService.publicKeyFromBase64(broadcast.publicKey))
         val sigBytes = Base64.getDecoder().decode(broadcast.signature)
         val hashBytes = Base64.getDecoder().decode(broadcast.fileHash)
-        return BleMetaPayload(fileIdBytes, broadcast.version, pubKeyBytes, sigBytes, hashBytes, broadcast.fileSize, broadcast.fileName)
+        return BleMetaPayload(fileIdBytes, broadcast.version, sigBytes, hashBytes, broadcast.fileSize, broadcast.fileName)
     }
 
     fun startAdvertising(broadcast: BroadcastEntity) {
@@ -294,7 +293,8 @@ class SyncEngine(
                 EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting relay update"); return false
             }
             lastProbeAt[deviceAddress] = System.currentTimeMillis()
-            val pubKey = cryptoService.publicKeyFromRaw(metaPayload.publicKey)
+            // Use the public key from the broadcast entity (originator), not from META
+            val pubKey = cryptoService.publicKeyFromBase64(broadcast.publicKey)
             val hashHex = metaPayload.fileHash.joinToString("") { "%02x".format(it) }
             val msg = cryptoService.buildSignatureMessage(broadcast.fileId, newVersion, hashHex)
             if (!cryptoService.verify(msg, metaPayload.signature, pubKey)) {
@@ -383,13 +383,8 @@ class SyncEngine(
                 EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting fetch"); return@withTimeout
             }
             lastProbeAt[deviceAddress] = System.currentTimeMillis()
-            val pubKey = cryptoService.publicKeyFromRaw(metaPayload.publicKey)
-            // The key embedded in the GATT payload must be the very key this
-            // subscription was created with (QR scan), otherwise reject.
-            if (!cryptoService.rawPublicKey(pubKey).contentEquals(cryptoService.rawPublicKey(cryptoService.publicKeyFromBase64(subscription.publicKey)))) {
-                EventLog.log("sync", "SECURITY: publisher key mismatch for ${subscription.fileId} - rejected")
-                Log.e(TAG, "Publisher key mismatch ${subscription.fileId}"); return@withTimeout
-            }
+            // Use the public key from the subscription (obtained from QR code/link), not from META
+            val pubKey = cryptoService.publicKeyFromBase64(subscription.publicKey)
             val hashHex = metaPayload.fileHash.joinToString("") { "%02x".format(it) }
             val msg = cryptoService.buildSignatureMessage(subscription.fileId, newVersion, hashHex)
             if (!cryptoService.verify(msg, metaPayload.signature, pubKey)) {
