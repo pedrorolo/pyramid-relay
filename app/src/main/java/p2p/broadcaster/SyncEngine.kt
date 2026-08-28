@@ -49,6 +49,8 @@ class SyncEngine(
     private val downloadMutex = Mutex()
     private val downloadSemaphore = Semaphore(1) // Only one download at a time
     private val uploadSemaphore = Semaphore(1) // Only one upload at a time
+    private val downloadRetryCount = ConcurrentHashMap<String, Int>()
+    private val maxRetries = 3
 
     private val _downloadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
     val downloadProgress: StateFlow<Map<String, Float>> = _downloadProgress.asStateFlow()
@@ -327,6 +329,12 @@ class SyncEngine(
                 EventLog.log("sync", "Download already in progress for \"${subscription.fileName ?: subscription.fileId}\" - skipping duplicate")
                 return false
             }
+            // Check retry limit
+            val retries = downloadRetryCount.getOrDefault(subscription.fileId, 0)
+            if (retries >= maxRetries) {
+                EventLog.log("sync", "Max retries ($maxRetries) reached for \"${subscription.fileName ?: subscription.fileId}\" - giving up")
+                return false
+            }
         }
         // Only one download at a time
         downloadSemaphore.withPermit {
@@ -354,9 +362,10 @@ class SyncEngine(
             EventLog.log("gatt", "Meta verified for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
             val tmpFile = fileService.getTmpFile(subscription.fileId, newVersion)
             tmpFile.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IllegalStateException("Cannot create temporary download directory") }
-            EventLog.log("ble", "Streaming ${subscription.fileId} v$newVersion (${metaPayload.fileSize}B) over GATT")
+            EventLog.log("ble", "Streaming ${subscription.fileId} v$newVersion (${metaPayload.fileSize}B) over GATT, tmpFile=${tmpFile.absolutePath}")
             val transferred = try {
                 tmpFile.outputStream().use { output ->
+                    EventLog.log("ble", "Output stream opened: ${output.javaClass.name}")
                     bleCentralService.fetchFile(deviceAddress, newVersion, metaPayload.fileSize, output) { got, total ->
                         val progress = (got.toFloat() / total.toFloat()).coerceIn(0f, 1f)
                         _downloadProgress.value = _downloadProgress.value + (subscription.fileId to progress)
@@ -365,16 +374,27 @@ class SyncEngine(
             } catch (e: Exception) {
                 EventLog.log("ble", "fetchFile error: ${e.message}"); false
             }
-            if (!transferred) { tmpFile.delete(); EventLog.log("wifi", "Transfer failed for ${subscription.fileId}"); return false }
+            EventLog.log("ble", "After fetchFile: transferred=$transferred, tmpFile.exists()=${tmpFile.exists()}, tmpFile.length()=${tmpFile.length()}")
+            if (!transferred) { 
+                tmpFile.delete()
+                downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
+                EventLog.log("wifi", "Transfer failed for ${subscription.fileId} (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)"); return false 
+            }
             if (!tmpFile.isFile || tmpFile.length() != metaPayload.fileSize) {
-                EventLog.log("sync", "Downloaded file size mismatch for ${subscription.fileId}: ${tmpFile.length()}/${metaPayload.fileSize}B")
-                tmpFile.delete(); return false
+                tmpFile.delete()
+                downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
+                EventLog.log("sync", "Downloaded file size mismatch for ${subscription.fileId}: ${tmpFile.length()}/${metaPayload.fileSize}B (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)")
+                return false
             }
             val receivedHash = cryptoService.sha256Hex(tmpFile.readBytes())
             if (receivedHash != hashHex) {
-                tmpFile.delete(); EventLog.log("sync", "Hash mismatch after transfer of ${subscription.fileId} - discarded")
+                tmpFile.delete()
+                downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
+                EventLog.log("sync", "Hash mismatch after transfer of ${subscription.fileId} - discarded (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)")
                 return false
             }
+            // Success - clear retry count
+            downloadRetryCount.remove(subscription.fileId)
             val internalFile = fileService.commitDownloadedFile(subscription.fileId, newVersion, tmpFile)
             EventLog.log("sync", "Committed ${internalFile.absolutePath} (${internalFile.length()}B) for subscription v$newVersion")
             val resolvedFileName = metaPayload.fileName.takeIf { it.isNotBlank() } ?: subscription.fileName

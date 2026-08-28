@@ -186,7 +186,18 @@ class BleCentralService(private val context: Context) {
                 if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
                     if (!gatt.requestMtu(517)) gatt.discoverServices()
                 } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
-                    if (!deferred.isCompleted) deferred.complete(false)
+                    EventLog.log("ble", "fetchFile: disconnected with ${buffer.size()}B received")
+                    if (!deferred.isCompleted) {
+                        // Write whatever we received to the output
+                        try { 
+                            output.write(buffer.toByteArray()); 
+                            output.flush()
+                            EventLog.log("ble", "fetchFile: flushed ${buffer.size()}B to output on disconnect")
+                        } catch (e: Exception) { 
+                            EventLog.log("ble", "fetchFile: flush on disconnect failed: ${e.message}") 
+                        }
+                        deferred.complete(false)
+                    }
                     gatt.close()
                 }
             }
@@ -228,7 +239,16 @@ class BleCentralService(private val context: Context) {
                 if ((got - value.size) / 40_720 != got / 40_720 || got.toLong() == expectedSize)
                     EventLog.log("ble", "Downloading... $got/$expectedSize B")
                 if (value.isEmpty() || got >= expectedSize) {
-                    try { output.write(buffer.toByteArray()); output.flush() } catch (e: Exception) { EventLog.log("ble", "fetchFile: flush failed: ${e.message}"); deferred.complete(false); return }
+                    EventLog.log("ble", "fetchFile: writing ${buffer.size()}B to output stream on thread ${Thread.currentThread().name}")
+                    try { 
+                        output.write(buffer.toByteArray()); 
+                        output.flush()
+                        EventLog.log("ble", "fetchFile: write complete, output stream class: ${output.javaClass.simpleName}")
+                    } catch (e: Exception) { 
+                        EventLog.log("ble", "fetchFile: flush failed: ${e.message}"); 
+                        deferred.complete(false); 
+                        return 
+                    }
                     deferred.complete(true)
                     gatt.disconnect(); gatt.close(); gattRef = null
                 }
