@@ -126,6 +126,20 @@ class SyncEngine(
                     kotlinx.coroutines.delay(2000L)
                 }
             }
+            // Periodic scan restart to fix Samsung BLE stack dropping service data
+            launch {
+                while (true) {
+                    kotlinx.coroutines.delay(60_000L)
+                    try {
+                        bleCentralService.stopScan()
+                        kotlinx.coroutines.delay(500L)
+                        bleCentralService.startScan()
+                        EventLog.log("ble", "Scan restarted (periodic)")
+                    } catch (e: Exception) {
+                        EventLog.log("ble", "Periodic scan restart failed: ${e.message}")
+                    }
+                }
+            }
             wifiDirectService.initialize()
             try { wifiDirectService.startServer() } catch (e: Exception) { Log.e(TAG, "wifi startServer failed", e); EventLog.log("wifi", "startServer failed: ${e.message}") }
         }
