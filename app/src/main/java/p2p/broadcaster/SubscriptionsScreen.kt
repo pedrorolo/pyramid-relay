@@ -313,10 +313,14 @@ fun SubscriptionRow(subscription: SubscriptionEntity, isDownloading: Boolean = f
                 Text(versionText, style = MaterialTheme.typography.bodySmall, color = versionColor)
                 Text(status, style = MaterialTheme.typography.bodySmall, color = if (status == "Downloading" || status == "Relaying") androidx.compose.ui.graphics.Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary)
                 if (status == "Downloading" || status == "Relaying") {
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                    )
+                    if (progress > 0f) {
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                        )
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                    }
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {

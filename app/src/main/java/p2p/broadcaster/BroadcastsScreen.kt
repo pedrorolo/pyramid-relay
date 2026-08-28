@@ -283,8 +283,8 @@ fun BroadcastsScreen(
                                 Text(statusText, style = MaterialTheme.typography.bodySmall, color = if (isStreaming) androidx.compose.ui.graphics.Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary)
                                 if (isStreaming) {
                                     val relayProgress = streamingProgress[broadcast.fileId] ?: 0f
-                                    if (relayProgress >= 0.99f) {
-                                        // Sender has sent all data, waiting for receiver - show indeterminate
+                                    if (relayProgress >= 0.99f || relayProgress == 0f) {
+                                        // Indeterminate: waiting for receiver or no data yet
                                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
                                     } else {
                                         LinearProgressIndicator(
