@@ -1,11 +1,19 @@
 package p2p.broadcaster
 
 import java.util.Base64
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,6 +23,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeout
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -129,7 +138,7 @@ class SyncEngine(
             // Periodic scan restart to fix Samsung BLE stack dropping service data
             launch {
                 while (true) {
-                    kotlinx.coroutines.delay(60_000L)
+                    kotlinx.coroutines.delay(30_000L)
                     try {
                         bleCentralService.stopScan()
                         kotlinx.coroutines.delay(500L)
@@ -137,6 +146,18 @@ class SyncEngine(
                         EventLog.log("ble", "Scan restarted (periodic)")
                     } catch (e: Exception) {
                         EventLog.log("ble", "Periodic scan restart failed: ${e.message}")
+                    }
+                }
+            }
+            // Periodic GATT server restart to fix META characteristic not found
+            launch {
+                while (true) {
+                    kotlinx.coroutines.delay(120_000L)
+                    try {
+                        blePeripheralService.restartGattServer()
+                        EventLog.log("ble", "GATT server restarted (periodic)")
+                    } catch (e: Exception) {
+                        EventLog.log("ble", "Periodic GATT server restart failed: ${e.message}")
                     }
                 }
             }
@@ -354,10 +375,12 @@ class SyncEngine(
         downloadSemaphore.withPermit {
             _downloadingFileIds.value = _downloadingFileIds.value + subscription.fileId
             EventLog.log("sync", "Download started for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion from ${deviceAddress.takeLast(5)}")
+        var downloadResult = false
         try {
+            withTimeout(90_000L) {
             val fileIdHash = cryptoService.fileIdHash(subscription.fileId)
             val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
-                EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting fetch"); return false
+                EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting fetch"); return@withTimeout
             }
             lastProbeAt[deviceAddress] = System.currentTimeMillis()
             val pubKey = cryptoService.publicKeyFromRaw(metaPayload.publicKey)
@@ -365,13 +388,13 @@ class SyncEngine(
             // subscription was created with (QR scan), otherwise reject.
             if (!cryptoService.rawPublicKey(pubKey).contentEquals(cryptoService.rawPublicKey(cryptoService.publicKeyFromBase64(subscription.publicKey)))) {
                 EventLog.log("sync", "SECURITY: publisher key mismatch for ${subscription.fileId} - rejected")
-                Log.e(TAG, "Publisher key mismatch ${subscription.fileId}"); return false
+                Log.e(TAG, "Publisher key mismatch ${subscription.fileId}"); return@withTimeout
             }
             val hashHex = metaPayload.fileHash.joinToString("") { "%02x".format(it) }
             val msg = cryptoService.buildSignatureMessage(subscription.fileId, newVersion, hashHex)
             if (!cryptoService.verify(msg, metaPayload.signature, pubKey)) {
                 EventLog.log("sync", "Signature check FAILED for ${subscription.fileName ?: subscription.fileId}")
-                return false
+                return@withTimeout
             }
             EventLog.log("gatt", "Meta verified for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
             val tmpFile = fileService.getTmpFile(subscription.fileId, newVersion)
@@ -392,20 +415,21 @@ class SyncEngine(
             if (!transferred) { 
                 tmpFile.delete()
                 downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
-                EventLog.log("wifi", "Transfer failed for ${subscription.fileId} (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)"); return false 
+                EventLog.log("sync", "Transfer failed for ${subscription.fileId} (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)"); return@withTimeout
             }
             if (!tmpFile.isFile || tmpFile.length() != metaPayload.fileSize) {
+                EventLog.log("sync", "Downloaded file size mismatch for ${subscription.fileId}: ${tmpFile.length()}/${metaPayload.fileSize}B")
                 tmpFile.delete()
                 downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
-                EventLog.log("sync", "Downloaded file size mismatch for ${subscription.fileId}: ${tmpFile.length()}/${metaPayload.fileSize}B (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)")
-                return false
+                EventLog.log("sync", "Transfer failed for ${subscription.fileId} (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)")
+                return@withTimeout
             }
             val receivedHash = cryptoService.sha256Hex(tmpFile.readBytes())
             if (receivedHash != hashHex) {
                 tmpFile.delete()
                 downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
                 EventLog.log("sync", "Hash mismatch after transfer of ${subscription.fileId} - discarded (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)")
-                return false
+                return@withTimeout
             }
             // Success - clear retry count
             downloadRetryCount.remove(subscription.fileId)
@@ -427,10 +451,15 @@ class SyncEngine(
                 throw IllegalStateException("Committed file changed after eviction: ${internalFile.length()}/${metaPayload.fileSize}B")
             }
             EventLog.log("sync", "Old versions evicted; current file remains ${internalFile.length()}B")
-            EventLog.log("sync", "Received \"${subscription.fileName ?: subscription.fileId}\" v$newVersion (${metaPayload.fileSize}B)")
+            val displayName = resolvedFileName ?: subscription.fileId
+            if (subscription.localVersion == null) {
+                EventLog.log("sync", "File \"$displayName\" downloaded!")
+            } else {
+                EventLog.log("sync", "File \"$displayName\" updated from version ${subscription.localVersion} to version $newVersion!")
+            }
             val shouldNotify = subscription.lastNotifiedVersion == null || subscription.lastNotifiedVersion < newVersion
             if (shouldNotify) {
-                notificationService.showUpdateNotification(subscription.fileName ?: "File", subscription.fileId, subscription.localVersion ?: 0, newVersion)
+                notificationService.showUpdateNotification(resolvedFileName ?: "File", subscription.fileId, subscription.localVersion ?: 0, newVersion)
                 subscriptionDao.updateLastNotified(subscription.fileId, newVersion)
             }
             // Become a relay: register as broadcast and advertise the same triple.
@@ -443,12 +472,23 @@ class SyncEngine(
             blePeripheralService.startAdvertising(subscription.fileId, relayPayload)
             EventLog.log("adv", "Relaying \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
             onFileReceived?.invoke(subscription.fileId, newVersion)
-            return true
-        } catch (e: Exception) { Log.e(TAG, "Error fetching sub update ${subscription.fileId}", e); EventLog.log("sync", "Error fetching sub update ${subscription.fileId}: ${e.message}"); return false }
-        finally {
+            downloadResult = true
+            }
+        } catch (e: TimeoutCancellationException) {
+            EventLog.log("sync", "Download timed out for ${subscription.fileId} after 90s (retry ${downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1}/$maxRetries)")
+            downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching sub update ${subscription.fileId}", e)
+            EventLog.log("sync", "Error fetching sub update ${subscription.fileId}: ${e.message}")
+        }
+        if (!downloadResult) {
             _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId
             _downloadProgress.value = _downloadProgress.value - subscription.fileId
+            return false
         }
+        _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId
+        _downloadProgress.value = _downloadProgress.value - subscription.fileId
+        return true
         }
     }
 

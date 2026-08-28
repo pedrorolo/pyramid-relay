@@ -189,6 +189,14 @@ class BlePeripheralService(private val context: Context) {
         Log.d(TAG, "GATT server started")
     }
 
+    @SuppressLint("MissingPermission")
+    fun restartGattServer() {
+        Log.d(TAG, "Restarting GATT server")
+        gattServer?.close()
+        gattServer = null
+        startGattServer()
+    }
+
     private fun connectedDevice(address: String): android.bluetooth.BluetoothDevice? =
         bluetoothManager.adapter?.getRemoteDevice(address)
 

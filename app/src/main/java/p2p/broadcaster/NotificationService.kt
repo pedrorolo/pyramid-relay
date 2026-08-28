@@ -55,12 +55,18 @@ class NotificationService(private val context: Context) {
         val pendingIntent = PendingIntent.getActivity(
             context, fileId.hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val notificationText = if (oldVersion == 0) {
+            "File \"$fileName\" retrieved!"
+        } else {
+            "File \"$fileName\" updated to v$newVersion from v$oldVersion!"
+        }
+        Log.d(TAG, "showUpdateNotification: fileName=$fileName, oldVersion=$oldVersion, newVersion=$newVersion, text=$notificationText")
         val notification = NotificationCompatBuilder(context).build(
-            CHANNEL_ID, "File updated", "\"$fileName\" v$oldVersion -> v$newVersion",
+            CHANNEL_ID, "File Update", notificationText,
             android.R.drawable.ic_dialog_info, pendingIntent
         )
         notificationManager.notify(fileId.hashCode(), notification)
-        Log.d(TAG, "Notification shown for $fileId v$newVersion")
+        Log.d(TAG, "Notification shown for $fileId: $notificationText")
     }
 
     fun requestPermission(): Boolean = notificationManager.areNotificationsEnabled()
