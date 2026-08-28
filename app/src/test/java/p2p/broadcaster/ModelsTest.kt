@@ -6,15 +6,14 @@ import org.junit.Test
 class ModelsTest {
 
     @Test
-    fun `spec 8 - BLE META_CHAR payload is 152 bytes`() {
-        assertEquals(152, BleMetaPayload.FIXED_SIZE - 2) // legacy fixed size minus the new nameLen field
+    fun `spec 8 - BLE META_CHAR payload is 122 bytes`() {
+        assertEquals(122, BleMetaPayload.FIXED_SIZE) // fileId(16) + version(4) + sig(64) + hash(32) + size(4) + nameLen(2)
     }
 
     @Test
-    fun `spec 8 - BLE META_CHAR layout fileId16 version4 pk32 sig64 fileHash32 size4`() {
+    fun `spec 8 - BLE META_CHAR layout fileId16 version4 sig64 fileHash32 size4`() {
         val fileId = ByteArray(16) { (it + 1).toByte() }
         val version = 1
-        val publicKey = ByteArray(32) { (it + 10).toByte() }
         val signature = ByteArray(64) { (it + 20).toByte() }
         val fileHash = ByteArray(32) { (it + 30).toByte() }
         val fileSize = 1024L
@@ -22,7 +21,7 @@ class ModelsTest {
         val payload = BleMetaPayload(fileId, version, signature, fileHash, fileSize, "test.bin")
         val bytes = payload.toBytes()
 
-        // Fixed prefix (no name) = 154 bytes; + 8B name = 162
+        // Fixed prefix (no name) = 118 bytes; + 8B name = 126
         assertEquals(BleMetaPayload.FIXED_SIZE + 8, bytes.size)
 
         var offset = 0
@@ -31,7 +30,6 @@ class ModelsTest {
             ((bytes[offset + 1].toInt() and 0xFF) shl 16) or
             ((bytes[offset + 2].toInt() and 0xFF) shl 8) or
             (bytes[offset + 3].toInt() and 0xFF)); offset += 4
-        assertArrayEquals(publicKey, bytes.copyOfRange(offset, offset + 32)); offset += 32
         assertArrayEquals(signature, bytes.copyOfRange(offset, offset + 64)); offset += 64
         assertArrayEquals(fileHash, bytes.copyOfRange(offset, offset + 32)); offset += 32
         val decodedSize = ((bytes[offset].toLong() and 0xFF) shl 24) or
