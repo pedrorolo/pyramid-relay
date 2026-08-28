@@ -4,8 +4,11 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -58,6 +61,7 @@ class MainActivity : ComponentActivity() {
 
     private var showMissingPermsDialog = mutableStateOf(false)
     private var missingPermsMessage = mutableStateOf("")
+    private var showBatteryOptDialog = mutableStateOf(false)
 
     private val requiredPermissions: Array<String>
         get() {
@@ -110,6 +114,26 @@ class MainActivity : ComponentActivity() {
                         }
                     )
                 }
+                if (showBatteryOptDialog.value) {
+                    AlertDialog(
+                        onDismissRequest = { },
+                        title = { Text("Battery Optimization") },
+                        text = { Text("For reliable file transfers, please disable battery optimization for P2P Broadcaster. Without this, transfers may be interrupted when the screen is off.") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                openBatteryOptimizationSettings()
+                                showBatteryOptDialog.value = false
+                            }) {
+                                Text("Open Settings")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showBatteryOptDialog.value = false }) {
+                                Text("Later")
+                            }
+                        }
+                    )
+                }
                 MainScreen(intent)
             }
         }
@@ -121,6 +145,9 @@ class MainActivity : ComponentActivity() {
         }
         if (missing.isEmpty()) {
             startSyncService()
+            if (!isBatteryOptimizationIgnored()) {
+                showBatteryOptDialog.value = true
+            }
         } else {
             permissionLauncher.launch(missing.toTypedArray())
         }
@@ -132,6 +159,29 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start BLE foreground service", e)
             EventLog.log("app", "Failed to start BLE foreground service: ${e.message}")
+        }
+    }
+
+    private fun isBatteryOptimizationIgnored(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        return pm.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    private fun openBatteryOptimizationSettings() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                try {
+                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Failed to open battery optimization settings", e2)
+                }
+            }
         }
     }
 }
