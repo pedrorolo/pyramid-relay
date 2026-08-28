@@ -83,9 +83,16 @@ class SubscriptionsViewModel(
 ) : ViewModel() {
     private val _subscriptions = MutableStateFlow<List<SubscriptionEntity>>(emptyList())
     val subscriptions: StateFlow<List<SubscriptionEntity>> = _subscriptions.asStateFlow()
-    val downloadingFileIds: StateFlow<Set<String>> get() = syncEngine?.downloadingFileIds ?: MutableStateFlow(emptySet())
-    val activeStreamingFileIds: StateFlow<Set<String>> get() = syncEngine?.activeStreamingFileIds ?: MutableStateFlow(emptySet())
-    val downloadProgress: StateFlow<Map<String, Float>> get() = syncEngine?.downloadProgress ?: MutableStateFlow(emptyMap())
+    val downloadingFileIds: StateFlow<Set<String>>
+        get() = syncEngine?.downloadingFileIds ?: MutableStateFlow(emptySet())
+    val activeStreamingFileIds: StateFlow<Set<String>>
+        get() = syncEngine?.activeStreamingFileIds ?: MutableStateFlow(
+            emptySet()
+        )
+    val downloadProgress: StateFlow<Map<String, Float>>
+        get() = syncEngine?.downloadProgress ?: MutableStateFlow(
+            emptyMap()
+        )
 
     init {
         viewModelScope.launch { refresh() }
@@ -126,12 +133,18 @@ class SubscriptionsViewModel(
 
     fun deleteSubscription(subscription: SubscriptionEntity) {
         viewModelScope.launch {
-            EventLog.log("sub", "Deleting subscription \"${subscription.fileName ?: subscription.fileId.takeLast(8)}\" (local v${subscription.localVersion})")
+            EventLog.log(
+                "sub",
+                "Deleting subscription \"${subscription.fileName ?: subscription.fileId.takeLast(8)}\" (local v${subscription.localVersion})"
+            )
             syncEngine?.stopAdvertisingForFile(subscription.fileId)
             fileService.deleteAll(subscription.fileId)
             subscriptionDao.delete(subscription.fileId)
             broadcastDao.delete(subscription.fileId)
-            EventLog.log("sub", "Deleted subscription ${subscription.fileId.takeLast(8)} - relay stopped, files removed")
+            EventLog.log(
+                "sub",
+                "Deleted subscription ${subscription.fileId.takeLast(8)} - relay stopped, files removed"
+            )
         }
     }
 }
@@ -140,7 +153,15 @@ class SubscriptionsViewModel(
 fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null) {
     val context = LocalContext.current
     val app = context.applicationContext as P2PBroadcasterApp
-    val viewModel = remember { SubscriptionsViewModel(app.subscriptionDao, app.broadcastDao, app.fileService, app.cryptoService, app.syncEngine) }
+    val viewModel = remember {
+        SubscriptionsViewModel(
+            app.subscriptionDao,
+            app.broadcastDao,
+            app.fileService,
+            app.cryptoService,
+            app.syncEngine
+        )
+    }
     val subscriptions by viewModel.subscriptions.collectAsState()
     val downloadingFileIds by viewModel.downloadingFileIds.collectAsState()
     val activeStreamingFileIds by viewModel.activeStreamingFileIds.collectAsState()
@@ -151,7 +172,9 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
 
     if (initialFileId != null && initialPk != null) {
         var added by remember { mutableStateOf(false) }
-        if (!added) { viewModel.addSubscription(initialFileId, initialPk, null); added = true }
+        if (!added) {
+            viewModel.addSubscription(initialFileId, initialPk, null); added = true
+        }
     }
 
     Scaffold { padding ->
@@ -230,7 +253,13 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
 }
 
 @Composable
-fun SubscriptionRow(subscription: SubscriptionEntity, isDownloading: Boolean = false, isStreaming: Boolean = false, progress: Float = 0f, onDelete: () -> Unit) {
+fun SubscriptionRow(
+    subscription: SubscriptionEntity,
+    isDownloading: Boolean = false,
+    isStreaming: Boolean = false,
+    progress: Float = 0f,
+    onDelete: () -> Unit
+) {
     val context = LocalContext.current
     val app = context.applicationContext as P2PBroadcasterApp
     var showQr by remember { mutableStateOf(false) }
@@ -242,10 +271,20 @@ fun SubscriptionRow(subscription: SubscriptionEntity, isDownloading: Boolean = f
         val fileName = subscription.fileName ?: "file.bin"
         val resolver = context.contentResolver
         // Delete existing entry with same name if present
-        resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Downloads._ID), "${MediaStore.Downloads.DISPLAY_NAME}=?", arrayOf(fileName), null)?.use { c ->
+        resolver.query(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Downloads._ID),
+            "${MediaStore.Downloads.DISPLAY_NAME}=?",
+            arrayOf(fileName),
+            null
+        )?.use { c ->
             if (c.moveToFirst()) {
                 val id = c.getLong(c.getColumnIndexOrThrow(MediaStore.Downloads._ID))
-                resolver.delete(MediaStore.Downloads.getContentUri("external"), "${MediaStore.Downloads._ID}=?", arrayOf(id.toString()))
+                resolver.delete(
+                    MediaStore.Downloads.getContentUri("external"),
+                    "${MediaStore.Downloads._ID}=?",
+                    arrayOf(id.toString())
+                )
             }
         }
         val values = android.content.ContentValues().apply {
@@ -273,14 +312,18 @@ fun SubscriptionRow(subscription: SubscriptionEntity, isDownloading: Boolean = f
         } else {
             (subscription.lastSeenVersion?.let { "Seen: v$it" } ?: "")
         }
-        val versionColor = if (subscription.localVersion == null) androidx.compose.ui.graphics.Color(0xFFE53935) else MaterialTheme.colorScheme.onSurface
+        val versionColor =
+            if (subscription.localVersion == null) androidx.compose.ui.graphics.Color(0xFFE53935) else MaterialTheme.colorScheme.onSurface
         val status = when {
             isDownloading -> "Downloading"
             isStreaming -> "Relaying"
-            else -> "Listening"
+            else -> "Advertising"
         }
         // Log status for debugging
-        android.util.Log.d("SubscriptionsScreen", "Status for ${subscription.fileName ?: subscription.fileId.take(8)}: $status (isDownloading=$isDownloading, isStreaming=$isStreaming)")
+        android.util.Log.d(
+            "SubscriptionsScreen",
+            "Status for ${subscription.fileName ?: subscription.fileId.take(8)}: $status (isDownloading=$isDownloading, isStreaming=$isStreaming)"
+        )
         val filePath = if (subscription.localVersion != null) remember(subscription.fileId, subscription.localVersion) {
             app.fileService.getFile(subscription.fileId, subscription.localVersion!!).absolutePath
         } else ""
@@ -301,7 +344,10 @@ fun SubscriptionRow(subscription: SubscriptionEntity, isDownloading: Boolean = f
             }
         } else null
 
-        Row(modifier = Modifier.fillMaxWidth().padding(12.dp).height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp).height(IntrinsicSize.Min),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     subscription.fileName ?: subscription.fileId.take(8),
@@ -311,7 +357,13 @@ fun SubscriptionRow(subscription: SubscriptionEntity, isDownloading: Boolean = f
                     modifier = if (saveOpen != null) Modifier.clickable { saveOpen() } else Modifier
                 )
                 Text(versionText, style = MaterialTheme.typography.bodySmall, color = versionColor)
-                Text(status, style = MaterialTheme.typography.bodySmall, color = if (status == "Downloading" || status == "Relaying") androidx.compose.ui.graphics.Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary)
+                Text(
+                    status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (status == "Downloading" || status == "Relaying") androidx.compose.ui.graphics.Color(
+                        0xFF4CAF50
+                    ) else MaterialTheme.colorScheme.primary
+                )
                 if (status == "Downloading" || status == "Relaying") {
                     if (progress > 0f) {
                         LinearProgressIndicator(
@@ -324,22 +376,51 @@ fun SubscriptionRow(subscription: SubscriptionEntity, isDownloading: Boolean = f
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-                    IconButton(onClick = { showQr = true }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.QrCode, contentDescription = "Share QR", modifier = Modifier.size(20.dp)) }
+                    IconButton(
+                        onClick = { showQr = true },
+                        modifier = Modifier.size(36.dp)
+                    ) { Icon(Icons.Default.QrCode, contentDescription = "Share QR", modifier = Modifier.size(20.dp)) }
                     IconButton(onClick = {
-                        val pkBytes = try { Base64.getDecoder().decode(subscription.publicKey) } catch (e: Exception) { Base64.getUrlDecoder().decode(subscription.publicKey) }
+                        val pkBytes = try {
+                            Base64.getDecoder().decode(subscription.publicKey)
+                        } catch (e: Exception) {
+                            Base64.getUrlDecoder().decode(subscription.publicKey)
+                        }
                         val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
                         val nameEnc = java.net.URLEncoder.encode(subscription.fileName ?: "", "UTF-8")
-                        val link = "p2pbroadcaster://subscribe?fileId=${subscription.fileId}&pk=$pkUrl&name=$nameEnc&v=${subscription.localVersion ?: subscription.lastSeenVersion ?: 1}"
+                        val link =
+                            "p2pbroadcaster://subscribe?fileId=${subscription.fileId}&pk=$pkUrl&name=$nameEnc&v=${subscription.localVersion ?: subscription.lastSeenVersion ?: 1}"
                         val shareIntent = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
                             putExtra(Intent.EXTRA_TEXT, link)
                         }
                         context.startActivity(Intent.createChooser(shareIntent, "Share link"))
-                    }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Share, contentDescription = "Share Link", modifier = Modifier.size(20.dp)) }
-                    if (subscription.localVersion != null) {
-                        IconButton(onClick = { saveToDownloads() }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.FileDownload, contentDescription = "Save", modifier = Modifier.size(20.dp)) }
+                    }, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            Icons.Default.Share,
+                            contentDescription = "Share Link",
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
-                    IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Delete, contentDescription = "Delete", modifier = Modifier.size(20.dp)) }
+                    if (subscription.localVersion != null) {
+                        IconButton(
+                            onClick = { saveToDownloads() },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.FileDownload,
+                                contentDescription = "Save",
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Delete",
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
             if (subscription.localVersion != null) {
@@ -349,7 +430,12 @@ fun SubscriptionRow(subscription: SubscriptionEntity, isDownloading: Boolean = f
                     ext in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
                 }
                 val previewModifier = if (isImage) Modifier.size(72.dp) else Modifier.width(72.dp).fillMaxHeight()
-                FilePreview(filePath = filePath, fileName = subscription.fileName, modifier = previewModifier, onClick = saveOpen)
+                FilePreview(
+                    filePath = filePath,
+                    fileName = subscription.fileName,
+                    modifier = previewModifier,
+                    onClick = saveOpen
+                )
             }
         }
     }
@@ -402,7 +488,9 @@ fun FilePreview(filePath: String, fileName: String?, modifier: Modifier = Modifi
             try {
                 val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
                 BitmapFactory.decodeFile(filePath, opts)
-            } catch (_: Exception) { null }
+            } catch (_: Exception) {
+                null
+            }
         }
         if (bitmap != null) {
             Image(

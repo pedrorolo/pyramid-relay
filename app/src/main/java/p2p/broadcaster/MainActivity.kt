@@ -211,23 +211,23 @@ fun MainScreen(intent: Intent? = null) {
                     selected = selectedTab == 0,
                     onClick = {
                         selectedTab = 0
-                        navController.navigate("broadcasts") {
-                            popUpTo("broadcasts") { inclusive = true }
+                        navController.navigate("subscriptions") {
+                            popUpTo("subscriptions") { inclusive = true }
                         }
                     },
-                    icon = { Icon(Icons.Default.BroadcastOnHome, contentDescription = "Broadcasts") },
-                    label = { Text("Broadcasts") }
+                    icon = { Icon(Icons.Default.Subscriptions, contentDescription = "Subscriptions") },
+                    label = { Text("Subscriptions") }
                 )
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = {
                         selectedTab = 1
-                        navController.navigate("subscriptions") {
-                            popUpTo("broadcasts")
+                        navController.navigate("broadcasts") {
+                            popUpTo("subscriptions")
                         }
                     },
-                    icon = { Icon(Icons.Default.Subscriptions, contentDescription = "Subscriptions") },
-                    label = { Text("Subscriptions") }
+                    icon = { Icon(Icons.Default.BroadcastOnHome, contentDescription = "Broadcasts") },
+                    label = { Text("Broadcasts") }
                 )
                 NavigationBarItem(
                     selected = selectedTab == 2,
@@ -245,7 +245,7 @@ fun MainScreen(intent: Intent? = null) {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = "broadcasts",
+            startDestination = "subscriptions",
             modifier = Modifier.padding(innerPadding)
         ) {
             composable("broadcasts") {
