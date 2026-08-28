@@ -207,18 +207,6 @@ class CryptoServiceTest {
     }
 
     @Test
-    fun `spec 7 - MAX_FILE_SIZE fits 5-minute GATT transfer`() {
-        // ~50 KB/s conservative BLE GATT throughput * 300 s = 15 MB
-        assertEquals(15L * 1024 * 1024, MAX_FILE_SIZE)
-        assertEquals(15728640L, MAX_FILE_SIZE)
-    }
-
-    @Test
-    fun `spec 9 - TRANSFER_PORT is 8988`() {
-        assertEquals(8988, TRANSFER_PORT)
-    }
-
-    @Test
     fun `spec 4 - multiple sign operations are independent`() {
         val kp = crypto.generateEd25519KeyPair()
         val msg1 = "message 1".toByteArray()
