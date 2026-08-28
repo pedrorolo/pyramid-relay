@@ -173,7 +173,7 @@ class BleCentralService(private val context: Context) {
      * Natural backpressure - the central requests every chunk itself.
      */
     @SuppressLint("MissingPermission")
-    suspend fun fetchFile(deviceAddress: String, version: Int, expectedSize: Long, output: java.io.OutputStream): Boolean {
+    suspend fun fetchFile(deviceAddress: String, version: Int, expectedSize: Long, output: java.io.OutputStream, onProgress: ((Long, Long) -> Unit)? = null): Boolean {
         val device = bluetoothManager.adapter?.getRemoteDevice(deviceAddress) ?: run {
             EventLog.log("ble", "fetchFile: adapter or device unavailable for ${deviceAddress.takeLast(5)}")
             return false
@@ -224,6 +224,7 @@ class BleCentralService(private val context: Context) {
                 if (characteristic.uuid != STREAM_UUID || deferred.isCompleted) return
                 buffer.write(value)
                 val got = buffer.size()
+                onProgress?.invoke(got.toLong(), expectedSize)
                 if ((got - value.size) / 40_720 != got / 40_720 || got.toLong() == expectedSize)
                     EventLog.log("ble", "Downloading... $got/$expectedSize B")
                 if (value.isEmpty() || got >= expectedSize) {
@@ -236,8 +237,8 @@ class BleCentralService(private val context: Context) {
         device.connectGatt(context, false, gattCallback, android.bluetooth.BluetoothDevice.TRANSPORT_LE).also { gattRef = it }
             ?: run { EventLog.log("ble", "fetchFile: connectGatt returned null for ${deviceAddress.takeLast(5)}"); return false }
         EventLog.log("ble", "GATT fetchFile v$version ($expectedSize B) from ${deviceAddress.takeLast(5)}")
-        // 10s handshake + conservative 20 KB/s transfer budget, capped at 10 minutes.
-        val timeoutMs = (10_000L + expectedSize * 1000L / 20_000L).coerceIn(20_000L, 600_000L)
+        // 10s handshake + conservative 20 KB/s transfer budget
+        val timeoutMs = 10_000L + expectedSize * 1000L / 20_000L
         val ok = try { withTimeout(timeoutMs) { deferred.await() } } catch (e: Exception) {
             EventLog.log("ble", "fetchFile TIMED OUT after ${timeoutMs / 1000}s (${buffer.size()}/$expectedSize B) from ${deviceAddress.takeLast(5)}")
             false

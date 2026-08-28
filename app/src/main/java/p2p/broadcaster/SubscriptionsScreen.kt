@@ -1,33 +1,49 @@
 package p2p.broadcaster
 
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Environment
+import android.provider.MediaStore
 import java.util.Base64
+import kotlin.math.pow
+import kotlin.math.sqrt
 import p2p.broadcaster.EventLog
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,7 +60,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -65,6 +85,7 @@ class SubscriptionsViewModel(
     val subscriptions: StateFlow<List<SubscriptionEntity>> = _subscriptions.asStateFlow()
     val downloadingFileIds: StateFlow<Set<String>> get() = syncEngine?.downloadingFileIds ?: MutableStateFlow(emptySet())
     val activeStreamingFileIds: StateFlow<Set<String>> get() = syncEngine?.activeStreamingFileIds ?: MutableStateFlow(emptySet())
+    val downloadProgress: StateFlow<Map<String, Float>> get() = syncEngine?.downloadProgress ?: MutableStateFlow(emptyMap())
 
     init {
         viewModelScope.launch { refresh() }
@@ -123,6 +144,7 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
     val subscriptions by viewModel.subscriptions.collectAsState()
     val downloadingFileIds by viewModel.downloadingFileIds.collectAsState()
     val activeStreamingFileIds by viewModel.activeStreamingFileIds.collectAsState()
+    val downloadProgress by viewModel.downloadProgress.collectAsState()
     var showPasteDialog by remember { mutableStateOf(false) }
     var showQrScan by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf<SubscriptionEntity?>(null) }
@@ -151,6 +173,7 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
                             subscription = subscription,
                             isDownloading = downloadingFileIds.contains(subscription.fileId),
                             isStreaming = activeStreamingFileIds.contains(subscription.fileId),
+                            progress = downloadProgress[subscription.fileId] ?: 0f,
                             onDelete = { showDeleteConfirm = subscription }
                         )
                     }
@@ -158,7 +181,7 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
             }
             Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { showPasteDialog = true }, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = null)
+                    Icon(Icons.Default.Add, contentDescription = null)
                     Spacer(modifier = Modifier.padding(4.dp))
                     Text("Paste Link")
                 }
@@ -207,24 +230,33 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
 }
 
 @Composable
-fun SubscriptionRow(subscription: SubscriptionEntity, isDownloading: Boolean = false, isStreaming: Boolean = false, onDelete: () -> Unit) {
+fun SubscriptionRow(subscription: SubscriptionEntity, isDownloading: Boolean = false, isStreaming: Boolean = false, progress: Float = 0f, onDelete: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as P2PBroadcasterApp
     var showQr by remember { mutableStateOf(false) }
-    val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { destUri ->
-        if (destUri != null && subscription.localVersion != null) {
-            try {
-                val source = app.fileService.getFile(subscription.fileId, subscription.localVersion)
-                EventLog.log("app", "Saving subscription ${subscription.fileId} v${subscription.localVersion} from ${source.absolutePath} (${source.length()}B)")
-                require(source.isFile && source.length() > 0) { "Downloaded file is missing or empty" }
-                val output = context.contentResolver.openOutputStream(destUri)
-                    ?: error("Cannot open destination")
-                output.use { out -> source.inputStream().use { it.copyTo(out) } }
-                EventLog.log("app", "File saved to ${destUri.lastPathSegment}")
-            } catch (e: Exception) {
-                EventLog.log("app", "Failed to save file: ${e.message}")
+
+    fun saveToDownloads(): Uri? {
+        if (subscription.localVersion == null) return null
+        val source = app.fileService.getFile(subscription.fileId, subscription.localVersion)
+        if (!source.isFile || source.length() == 0L) return null
+        val fileName = subscription.fileName ?: "file.bin"
+        val resolver = context.contentResolver
+        // Delete existing entry with same name if present
+        resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Downloads._ID), "${MediaStore.Downloads.DISPLAY_NAME}=?", arrayOf(fileName), null)?.use { c ->
+            if (c.moveToFirst()) {
+                val id = c.getLong(c.getColumnIndexOrThrow(MediaStore.Downloads._ID))
+                resolver.delete(MediaStore.Downloads.getContentUri("external"), "${MediaStore.Downloads._ID}=?", arrayOf(id.toString()))
             }
         }
+        val values = android.content.ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+            put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+        }
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+        resolver.openOutputStream(uri)?.use { out -> source.inputStream().use { it.copyTo(out) } }
+        EventLog.log("app", "Saved \"$fileName\" to Downloads (${source.length()}B)")
+        return uri
     }
     if (showQr) {
         QrDisplayDialog(
@@ -236,49 +268,84 @@ fun SubscriptionRow(subscription: SubscriptionEntity, isDownloading: Boolean = f
         )
     }
     Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(subscription.fileName ?: subscription.fileId.take(8), style = MaterialTheme.typography.titleMedium)
-            val versionText = if (subscription.localVersion != null) {
-                "Local: v${subscription.localVersion}" +
-                    (subscription.lastSeenVersion?.let { " | Seen: v$it" } ?: "")
-            } else {
-                (subscription.lastSeenVersion?.let { "Seen: v$it" } ?: "No local copy")
-            }
-            Text(versionText, style = MaterialTheme.typography.bodySmall, color = if (subscription.localVersion == null) androidx.compose.ui.graphics.Color(0xFFE53935) else MaterialTheme.colorScheme.onSurface)
-            val status = when {
-                isDownloading -> "Downloading"
-                isStreaming -> "Relaying"
-                else -> "Listening"
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (status == "Downloading" || status == "Relaying") {
-                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                    Spacer(modifier = Modifier.width(6.dp))
-                }
-                Text(status, style = MaterialTheme.typography.bodySmall, color = if (status == "Downloading" || status == "Relaying") androidx.compose.ui.graphics.Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary)
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Row {
-                val clipboardManager = LocalClipboardManager.current
-                IconButton(onClick = { showQr = true }) { Icon(Icons.Default.QrCode, contentDescription = "Share QR") }
-                IconButton(onClick = {
-                    val pkBytes = try {
-                        Base64.getDecoder().decode(subscription.publicKey)
+        val versionText = if (subscription.localVersion != null) {
+            "Local: v${subscription.localVersion}" + (subscription.lastSeenVersion?.let { " | Seen: v$it" } ?: "")
+        } else {
+            (subscription.lastSeenVersion?.let { "Seen: v$it" } ?: "")
+        }
+        val versionColor = if (subscription.localVersion == null) androidx.compose.ui.graphics.Color(0xFFE53935) else MaterialTheme.colorScheme.onSurface
+        val status = when {
+            isDownloading -> "Downloading"
+            isStreaming -> "Relaying"
+            else -> "Listening"
+        }
+        // Log status for debugging
+        android.util.Log.d("SubscriptionsScreen", "Status for ${subscription.fileName ?: subscription.fileId.take(8)}: $status (isDownloading=$isDownloading, isStreaming=$isStreaming)")
+        val filePath = if (subscription.localVersion != null) remember(subscription.fileId, subscription.localVersion) {
+            app.fileService.getFile(subscription.fileId, subscription.localVersion!!).absolutePath
+        } else ""
+        val saveOpen: (() -> Unit)? = if (subscription.localVersion != null) {
+            {
+                val uri = saveToDownloads()
+                if (uri != null) {
+                    try {
+                        val openIntent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(uri, context.contentResolver.getType(uri) ?: "application/octet-stream")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(openIntent)
                     } catch (e: Exception) {
-                        Base64.getUrlDecoder().decode(subscription.publicKey)
+                        EventLog.log("app", "No app to open file: ${e.message}")
                     }
-                    val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
-                    val nameEnc = java.net.URLEncoder.encode(subscription.fileName ?: "", "UTF-8")
-                    val link = "p2pbroadcaster://subscribe?fileId=${subscription.fileId}&pk=$pkUrl&name=$nameEnc&v=${subscription.localVersion ?: subscription.lastSeenVersion ?: 1}"
-                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(link))
-                    EventLog.log("app", "Link copied to clipboard")
-                }) { Icon(Icons.Default.ContentCopy, contentDescription = "Copy Link") }
-                if (subscription.localVersion != null) {
-                    IconButton(onClick = {
-                        saveLauncher.launch(subscription.fileName ?: "file.bin")
-                    }) { Icon(Icons.Default.FileDownload, contentDescription = "Save") }
                 }
-                IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
+            }
+        } else null
+
+        Row(modifier = Modifier.fillMaxWidth().padding(12.dp).height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    subscription.fileName ?: subscription.fileId.take(8),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = if (saveOpen != null) Modifier.clickable { saveOpen() } else Modifier
+                )
+                Text(versionText, style = MaterialTheme.typography.bodySmall, color = versionColor)
+                Text(status, style = MaterialTheme.typography.bodySmall, color = if (status == "Downloading" || status == "Relaying") androidx.compose.ui.graphics.Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary)
+                if (status == "Downloading" || status == "Relaying") {
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+                    IconButton(onClick = { showQr = true }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.QrCode, contentDescription = "Share QR", modifier = Modifier.size(20.dp)) }
+                    IconButton(onClick = {
+                        val pkBytes = try { Base64.getDecoder().decode(subscription.publicKey) } catch (e: Exception) { Base64.getUrlDecoder().decode(subscription.publicKey) }
+                        val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
+                        val nameEnc = java.net.URLEncoder.encode(subscription.fileName ?: "", "UTF-8")
+                        val link = "p2pbroadcaster://subscribe?fileId=${subscription.fileId}&pk=$pkUrl&name=$nameEnc&v=${subscription.localVersion ?: subscription.lastSeenVersion ?: 1}"
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, link)
+                        }
+                        context.startActivity(Intent.createChooser(shareIntent, "Share link"))
+                    }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Share, contentDescription = "Share Link", modifier = Modifier.size(20.dp)) }
+                    if (subscription.localVersion != null) {
+                        IconButton(onClick = { saveToDownloads() }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.FileDownload, contentDescription = "Save", modifier = Modifier.size(20.dp)) }
+                    }
+                    IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Delete, contentDescription = "Delete", modifier = Modifier.size(20.dp)) }
+                }
+            }
+            if (subscription.localVersion != null) {
+                Spacer(modifier = Modifier.width(12.dp))
+                val isImage = remember(subscription.fileId) {
+                    val ext = subscription.fileName?.substringAfterLast('.', "")?.lowercase() ?: ""
+                    ext in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
+                }
+                val previewModifier = if (isImage) Modifier.size(72.dp) else Modifier.width(72.dp).fillMaxHeight()
+                FilePreview(filePath = filePath, fileName = subscription.fileName, modifier = previewModifier, onClick = saveOpen)
             }
         }
     }
@@ -317,4 +384,45 @@ fun PasteLinkDialog(onDismiss: () -> Unit, onConfirm: (fileId: String, pk: Strin
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
+}
+
+@Composable
+fun FilePreview(filePath: String, fileName: String?, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
+    val clickModifier = if (onClick != null) modifier.clickable { onClick() } else modifier
+    val isImage = remember(filePath) {
+        val ext = fileName?.substringAfterLast('.', "")?.lowercase() ?: ""
+        ext in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
+    }
+    if (isImage) {
+        val bitmap = remember(filePath) {
+            try {
+                val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
+                BitmapFactory.decodeFile(filePath, opts)
+            } catch (_: Exception) { null }
+        }
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = fileName,
+                contentScale = ContentScale.Crop,
+                modifier = clickModifier.clip(RoundedCornerShape(6.dp))
+            )
+        } else {
+            FilePlaceholder(clickModifier)
+        }
+    } else {
+        FilePlaceholder(clickModifier)
+    }
+}
+
+@Composable
+private fun FilePlaceholder(modifier: Modifier = Modifier) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Icon(
+            Icons.Default.InsertDriveFile,
+            contentDescription = "File",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            modifier = Modifier.size(32.dp)
+        )
+    }
 }

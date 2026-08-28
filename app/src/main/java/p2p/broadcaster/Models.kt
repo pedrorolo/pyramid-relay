@@ -11,8 +11,8 @@ const val INFO_CHAR_UUID = "f47b5e2a-1c3d-4a6e-8b9f-0d2e4f6a8c0d"
 const val STREAM_CHAR_UUID = "f47b5e2a-1c3d-4a6e-8b9f-0d2e4f6a8c0e"
 const val TRANSFER_PORT = 8988
 // GATT-only transfer (option C): conservative Android-to-Android BLE throughput
-// is ~50 KB/s; a 15 MB file therefore takes at most ~5 minutes to transfer.
-const val MAX_FILE_SIZE = 15L * 1024 * 1024
+// is ~50 KB/s; a 100 MB file therefore takes at most ~33 minutes to transfer.
+const val MAX_FILE_SIZE = 20L * 1024 * 1024
 
 data class BleAdvertisement(
     val fileIdHash: ByteArray,

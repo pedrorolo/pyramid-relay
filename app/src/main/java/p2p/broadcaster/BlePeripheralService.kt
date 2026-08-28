@@ -63,6 +63,8 @@ class BlePeripheralService(private val context: Context) {
     private val _activeStreamingFileIds = MutableStateFlow<Set<String>>(emptySet())
     val activeStreamingFileIds: StateFlow<Set<String>> = _activeStreamingFileIds.asStateFlow()
     private val streamToFileId = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val _streamingProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
+    val streamingProgress: StateFlow<Map<String, Float>> = _streamingProgress.asStateFlow()
 
     fun setServeFileLoader(loader: (fileId: String, version: Int) -> ByteArray?) { serveFileLoaderField = loader }
 
@@ -94,6 +96,7 @@ class BlePeripheralService(private val context: Context) {
                         val fId = streamToFileId.remove(addr)
                         if (fId != null) {
                             _activeStreamingFileIds.value = _activeStreamingFileIds.value - fId
+                            _streamingProgress.value = _streamingProgress.value - fId
                             EventLog.log("ble", "Stream ended for ${fId.takeLast(8)} (disconnect) [active streams: ${_activeStreamingFileIds.value.size}]")
                         }
                         streams.remove(addr); subscribedCentrals.remove(addr)
@@ -199,10 +202,12 @@ class BlePeripheralService(private val context: Context) {
      * BLE stack without forwarding to onDescriptorWriteRequest.
      */
     private val pushing = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val uploadSemaphore = java.util.concurrent.Semaphore(1) // Only one upload at a time
     private fun pushStreamTo(address: String) {
         if (!pushing.add(address)) return
         Thread {
             try {
+                uploadSemaphore.acquire()
                 val server = gattServer ?: return@Thread
                 val char = streamCharacteristic() ?: return@Thread
                 var logged = 0
@@ -213,6 +218,12 @@ class BlePeripheralService(private val context: Context) {
                     val end = minOf(stream.pos + 512, stream.data.size)
                     val chunk = stream.data.copyOfRange(stream.pos, end)
                     stream.pos = end
+                    // Update progress - cap at 99% until stream is confirmed complete
+                    val fId = streamToFileId[address]
+                    if (fId != null) {
+                        val progress = (end.toFloat() / stream.data.size.toFloat()).coerceIn(0f, 0.99f)
+                        _streamingProgress.value = _streamingProgress.value + (fId to progress)
+                    }
                     if (end / 40_720 != logged / 40_720 || end >= stream.data.size) { logged = end; EventLog.log("ble", "Streaming ${end}/${stream.data.size}B to ${address.takeLast(5)}") }
                     if (!char.setValue(chunk)) {
                         EventLog.log("ble", "setValue FAILED for ${address.takeLast(5)}")
@@ -225,10 +236,14 @@ class BlePeripheralService(private val context: Context) {
                     Thread.sleep(10) // give Samsung BLE stack time to process
                 }
             } finally {
+                uploadSemaphore.release()
                 pushing.remove(address)
                 val fId = streamToFileId.remove(address)
                 if (fId != null) {
+                    // Set to 100% before clearing so UI shows completion
+                    _streamingProgress.value = _streamingProgress.value + (fId to 1f)
                     _activeStreamingFileIds.value = _activeStreamingFileIds.value - fId
+                    _streamingProgress.value = _streamingProgress.value - fId
                     EventLog.log("ble", "Stream ended for ${fId.takeLast(8)} (complete) [active streams: ${_activeStreamingFileIds.value.size}]")
                 }
             }
@@ -299,13 +314,18 @@ class BlePeripheralService(private val context: Context) {
             EventLog.log("ble", "Rotation skipped (${advertisingFiles.size} file(s) — static advertising)")
             return
         }
-        val intervalMs = 30_000L
+        val intervalMs = 10_000L
         rotationRunning = true
         EventLog.log("ble", "Rotation thread starting (${advertisingFiles.size} files, ${intervalMs / 1000}s interval)")
         rotationThread = Thread({
             while (rotationRunning && advertisingFiles.size > 1) {
                 try { Thread.sleep(intervalMs) } catch (_: InterruptedException) { break }
                 if (advertisingFiles.size <= 1) break
+                // Skip rotation while any file is being actively relayed
+                if (_activeStreamingFileIds.value.isNotEmpty()) {
+                    EventLog.log("ble", "Rotation skipped (${_activeStreamingFileIds.value.size} active stream(s))")
+                    continue
+                }
                 val prev = advertisingFiles[currentAdIndex % advertisingFiles.size].first.takeLast(8)
                 currentAdIndex = (currentAdIndex + 1) % advertisingFiles.size
                 val next = advertisingFiles[currentAdIndex % advertisingFiles.size].first.takeLast(8)

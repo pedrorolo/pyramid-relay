@@ -36,15 +36,10 @@ class FileService(private val context: Context) {
     }
 
     fun importFile(fileId: String, version: Int, inputStream: InputStream, contentLength: Long?): String {
-        if (contentLength != null && contentLength > MAX_FILE_SIZE)
-            throw IllegalArgumentException("File too large for 5-minute GATT transfer (max 15MB)")
         val vDir = getVersionDir(fileId, version); vDir.mkdirs()
         val tmpFile = getTmpFile(fileId, version)
         try {
             FileOutputStream(tmpFile).use { output -> inputStream.use { input -> input.copyTo(output, bufferSize = 65536) } }
-            if (contentLength == null && tmpFile.length() > MAX_FILE_SIZE) {
-                tmpFile.delete(); throw IllegalArgumentException("File too large for 5-minute GATT transfer (max 15MB)")
-            }
             val stat = StatFs(context.filesDir.path)
             if (stat.availableBlocksLong * stat.blockSizeLong < tmpFile.length() + MIN_FREE_SPACE) {
                 tmpFile.delete(); throw IllegalStateException("Insufficient disk space")

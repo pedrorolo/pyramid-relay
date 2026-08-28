@@ -40,7 +40,7 @@ class ViewModelTest {
     }
 
     @Test
-    fun `spec 11 - BroadcastsViewModel shows all broadcasts`() = runTest {
+    fun `spec 11 - BroadcastsViewModel only shows ORIGINATOR broadcasts`() = runTest {
         val originator = BroadcastEntity(
             "id1", "a.txt", "text/plain", "/p", "h", 100, 1,
             "pk", null, "sig", Role.ORIGINATOR, 0, 0
@@ -55,7 +55,9 @@ class ViewModelTest {
         advanceUntilIdle()
 
         val broadcasts = vm.broadcasts.value
-        assertEquals(2, broadcasts.size)
+        assertEquals(1, broadcasts.size)
+        assertEquals("id1", broadcasts[0].fileId)
+        assertEquals(Role.ORIGINATOR, broadcasts[0].role)
     }
 
     @Test

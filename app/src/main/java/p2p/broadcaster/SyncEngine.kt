@@ -11,6 +11,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -42,8 +46,15 @@ class SyncEngine(
 
     private val _downloadingFileIds = MutableStateFlow<Set<String>>(emptySet())
     val downloadingFileIds: StateFlow<Set<String>> = _downloadingFileIds.asStateFlow()
+    private val downloadMutex = Mutex()
+    private val downloadSemaphore = Semaphore(1) // Only one download at a time
+    private val uploadSemaphore = Semaphore(1) // Only one upload at a time
+
+    private val _downloadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
+    val downloadProgress: StateFlow<Map<String, Float>> = _downloadProgress.asStateFlow()
 
     val activeStreamingFileIds: StateFlow<Set<String>> get() = blePeripheralService.activeStreamingFileIds
+    val streamingProgress: StateFlow<Map<String, Float>> get() = blePeripheralService.streamingProgress
 
     fun start() {
         if (engineJob?.isActive == true) return
@@ -229,6 +240,17 @@ class SyncEngine(
 
     /** Relay keeping its own copy current: verify meta, pull bytes, re-sign, update DB. */
     private suspend fun fetchAndUpdateBroadcast(broadcast: BroadcastEntity, newVersion: Int, deviceAddress: String): Boolean {
+        // Prevent multiple concurrent downloads for the same fileId - atomic check-and-add
+        downloadMutex.withLock {
+            if (_downloadingFileIds.value.contains(broadcast.fileId)) {
+                EventLog.log("sync", "Download already in progress for \"${broadcast.fileName}\" - skipping duplicate")
+                return false
+            }
+        }
+        // Only one download at a time
+        downloadSemaphore.withPermit {
+            _downloadingFileIds.value = _downloadingFileIds.value + broadcast.fileId
+            EventLog.log("sync", "Download started for \"${broadcast.fileName}\" v$newVersion from ${deviceAddress.takeLast(5)}")
         try {
             val fileIdHash = cryptoService.fileIdHash(broadcast.fileId)
             val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
@@ -248,7 +270,10 @@ class SyncEngine(
             EventLog.log("ble", "Streaming ${broadcast.fileId} v$newVersion (${metaPayload.fileSize}B) over GATT")
             val transferred = try {
                 tmpFile.outputStream().use { output ->
-                    bleCentralService.fetchFile(deviceAddress, newVersion, metaPayload.fileSize, output)
+                    bleCentralService.fetchFile(deviceAddress, newVersion, metaPayload.fileSize, output) { got, total ->
+                        val progress = (got.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                        _downloadProgress.value = _downloadProgress.value + (broadcast.fileId to progress)
+                    }
                 }
             } catch (e: Exception) {
                 EventLog.log("ble", "fetchFile error: ${e.message}"); false
@@ -286,12 +311,27 @@ class SyncEngine(
             broadcastDao.getById(broadcast.fileId)?.let { startAdvertising(it) }
             return true
         } catch (e: Exception) { Log.e(TAG, "Error fetching update ${broadcast.fileId}", e); EventLog.log("sync", "Error fetching update ${broadcast.fileId}: ${e.message}"); return false }
+        finally {
+            _downloadingFileIds.value = _downloadingFileIds.value - broadcast.fileId
+            _downloadProgress.value = _downloadProgress.value - broadcast.fileId
+            EventLog.log("sync", "Download finished for \"${broadcast.fileName}\"")
+        }
+        }
     }
 
     /** Subscriber receiving a new version of a subscribed file. */
     private suspend fun fetchAndUpdateSubscription(subscription: SubscriptionEntity, newVersion: Int, deviceAddress: String): Boolean {
-        _downloadingFileIds.value = _downloadingFileIds.value + subscription.fileId
-        EventLog.log("sync", "Download started for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
+        // Prevent multiple concurrent downloads for the same fileId - atomic check-and-add
+        downloadMutex.withLock {
+            if (_downloadingFileIds.value.contains(subscription.fileId)) {
+                EventLog.log("sync", "Download already in progress for \"${subscription.fileName ?: subscription.fileId}\" - skipping duplicate")
+                return false
+            }
+        }
+        // Only one download at a time
+        downloadSemaphore.withPermit {
+            _downloadingFileIds.value = _downloadingFileIds.value + subscription.fileId
+            EventLog.log("sync", "Download started for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion from ${deviceAddress.takeLast(5)}")
         try {
             val fileIdHash = cryptoService.fileIdHash(subscription.fileId)
             val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
@@ -317,7 +357,10 @@ class SyncEngine(
             EventLog.log("ble", "Streaming ${subscription.fileId} v$newVersion (${metaPayload.fileSize}B) over GATT")
             val transferred = try {
                 tmpFile.outputStream().use { output ->
-                    bleCentralService.fetchFile(deviceAddress, newVersion, metaPayload.fileSize, output)
+                    bleCentralService.fetchFile(deviceAddress, newVersion, metaPayload.fileSize, output) { got, total ->
+                        val progress = (got.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                        _downloadProgress.value = _downloadProgress.value + (subscription.fileId to progress)
+                    }
                 }
             } catch (e: Exception) {
                 EventLog.log("ble", "fetchFile error: ${e.message}"); false
@@ -368,7 +411,11 @@ class SyncEngine(
             onFileReceived?.invoke(subscription.fileId, newVersion)
             return true
         } catch (e: Exception) { Log.e(TAG, "Error fetching sub update ${subscription.fileId}", e); EventLog.log("sync", "Error fetching sub update ${subscription.fileId}: ${e.message}"); return false }
-        finally { _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId }
+        finally {
+            _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId
+            _downloadProgress.value = _downloadProgress.value - subscription.fileId
+        }
+        }
     }
 
     fun stopAdvertisingForFile(fileId: String) {
