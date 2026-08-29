@@ -150,6 +150,10 @@ class SyncEngine(
             launch {
                 while (true) {
                     kotlinx.coroutines.delay(30_000L)
+                    if (_downloadingFileIds.value.isNotEmpty() || activeUploadPeers.isNotEmpty()) {
+                        EventLog.log("ble", "Periodic scan restart skipped (transfer in progress)")
+                        continue
+                    }
                     try {
                         bleCentralService.stopScan()
                         kotlinx.coroutines.delay(500L)
