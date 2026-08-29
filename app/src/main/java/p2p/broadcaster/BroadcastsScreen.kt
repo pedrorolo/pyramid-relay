@@ -261,7 +261,7 @@ fun BroadcastsScreen(
                                 Text(broadcast.fileName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.clickable { saveAndOpen() })
                                 val compressedText = if (broadcast.compressedSize in 1 until broadcast.fileSize) " (compressed ${formatSize(broadcast.compressedSize)})" else ""
                                 Text("v${broadcast.version} | ${formatSize(broadcast.fileSize)}$compressedText", style = MaterialTheme.typography.bodySmall)
-                                Text(statusText, style = MaterialTheme.typography.bodySmall, color = if (isStreaming || isAdvertising) androidx.compose.ui.graphics.Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(statusText, style = MaterialTheme.typography.bodySmall, color = if (isStreaming || isAdvertising) androidx.compose.ui.graphics.Color(0xFF4CAF50) else androidx.compose.ui.graphics.Color(0xFF9E9E9E))
                                 if (isStreaming) {
                                     val relayProgress = streamingProgress[broadcast.fileId] ?: 0f
                                     if (relayProgress >= 0.99f || relayProgress == 0f) {

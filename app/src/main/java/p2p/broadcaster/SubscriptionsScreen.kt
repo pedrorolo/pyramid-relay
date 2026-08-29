@@ -312,7 +312,7 @@ fun SubscriptionRow(
             isStreaming -> "Relaying"
             isAdvertising && subscription.localVersion != null -> "Advertising"
             subscription.localVersion == null -> "Searching"
-            else -> "Scanning Updates"
+            else -> "Scanning for updates"
         }
         // Log status for debugging
         android.util.Log.d(
