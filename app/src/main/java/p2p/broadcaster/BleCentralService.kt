@@ -156,7 +156,7 @@ class BleCentralService(private val context: Context) {
             }
             device.connectGatt(context, false, gattCallback, android.bluetooth.BluetoothDevice.TRANSPORT_LE)
             EventLog.log("ble", "GATT connect to ${deviceAddress.takeLast(5)} for meta read (attempt $attemptNo)")
-            val result = try { withTimeout(10_000L) { deferred.await() } } catch (e: Exception) { Log.e(TAG, "Timeout reading meta from $deviceAddress", e); EventLog.log("ble", "Meta read TIMED OUT from ${deviceAddress.takeLast(5)} (attempt $attemptNo)"); null }
+            val result = try { withTimeout(30_000L) { deferred.await() } } catch (e: Exception) { Log.e(TAG, "Timeout reading meta from $deviceAddress", e); EventLog.log("ble", "Meta read TIMED OUT from ${deviceAddress.takeLast(5)} (attempt $attemptNo)"); null }
             if (result != null) return result
             kotlinx.coroutines.delay(300)
         }
@@ -257,8 +257,8 @@ class BleCentralService(private val context: Context) {
         device.connectGatt(context, false, gattCallback, android.bluetooth.BluetoothDevice.TRANSPORT_LE).also { gattRef = it }
             ?: run { EventLog.log("ble", "fetchFile: connectGatt returned null for ${deviceAddress.takeLast(5)}"); return false }
         EventLog.log("ble", "GATT fetchFile v$version ($expectedSize B) from ${deviceAddress.takeLast(5)}")
-        // 10s handshake + conservative 20 KB/s transfer budget
-        val timeoutMs = 10_000L + expectedSize * 1000L / 20_000L
+        // 30s handshake + conservative 20 KB/s transfer budget
+        val timeoutMs = 30_000L + expectedSize * 1000L / 20_000L
         val ok = try { withTimeout(timeoutMs) { deferred.await() } } catch (e: Exception) {
             EventLog.log("ble", "fetchFile TIMED OUT after ${timeoutMs / 1000}s (${buffer.size()}/$expectedSize B) from ${deviceAddress.takeLast(5)}")
             false
