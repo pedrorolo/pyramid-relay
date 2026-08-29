@@ -108,7 +108,8 @@ class SubscriptionsViewModel(
             try {
                 // Validate before persisting: a malformed key would poison every
                 // later discovery pass (and previously crashed the app).
-                cryptoService.publicKeyFromBase64(publicKeyBase64)
+                val publicKey = cryptoService.publicKeyFromBase64(publicKeyBase64)
+                cryptoService.storeRecipientKey(publicKey, cryptoService.generateRsaKeyPair())
             } catch (e: Exception) {
                 EventLog.log("sub", "Rejected subscription ${fileId.takeLast(8)} - invalid public key (${e.message})")
                 return@launch

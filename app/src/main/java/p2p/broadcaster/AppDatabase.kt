@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
-class AppDatabase(context: android.content.Context) : SQLiteOpenHelper(context, "p2p_broadcaster.db", null, 2) {
+class AppDatabase(context: android.content.Context) : SQLiteOpenHelper(context, "p2p_broadcaster.db", null, 3) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""
@@ -63,6 +63,10 @@ class AppDatabase(context: android.content.Context) : SQLiteOpenHelper(context, 
             if (!hasCompressedSize) {
                 db.execSQL("ALTER TABLE broadcasts ADD COLUMN compressedSize INTEGER NOT NULL DEFAULT 0")
             }
+        }
+        if (oldVersion < 3) {
+            // Signature is retained as an empty compatibility column for existing databases.
+            // New transfers use authenticated encryption instead.
         }
     }
 }

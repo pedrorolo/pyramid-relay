@@ -27,6 +27,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
 import java.util.UUID
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 class SyncEngine(
@@ -117,14 +118,26 @@ class SyncEngine(
             Log.d(TAG, "SyncEngine started")
             EventLog.log("sync", "Engine started - scanning, advertising and transfer server active")
             blePeripheralService.setMetaPayloadProvider { fileId -> buildMetaPayload(fileId) }
-            // GATT streaming: serves compressed bytes of the file we advertise.
+            // GATT streaming serves the encrypted envelope, which relays can forward unchanged.
             blePeripheralService.setServeFileLoader { fileId, version ->
+                kotlinx.coroutines.runBlocking {
                 try {
-                    val compressed = fileService.getCompressedFile(fileId, version)
-                    compressed.readBytes()
+                    val broadcast = broadcastDao.getById(fileId)
+                    if (broadcast == null) {
+                        null
+                    } else {
+                        val encrypted = File(fileService.getVersionDir(fileId, version), "file.encrypted")
+                        if (!encrypted.exists()) {
+                            val compressed = fileService.getCompressedFile(fileId, version).readBytes()
+                            val publicKey = cryptoService.publicKeyFromBase64(broadcast.publicKey)
+                            encrypted.writeBytes(cryptoService.encryptCompressed(compressed, publicKey))
+                        }
+                        encrypted.readBytes()
+                    }
                 } catch (e: Exception) {
                     EventLog.log("ble", "Failed to get compressed file for streaming: ${e.message}")
                     null
+                }
                 }
             }
             bleCentralService.onDeviceDiscovered = { address, serviceData ->
@@ -268,9 +281,9 @@ class SyncEngine(
     suspend fun buildMetaPayload(fileId: String): BleMetaPayload? {
         val broadcast = broadcastDao.getById(fileId) ?: return null
         val fileIdBytes = uuidToBytes(fileId) ?: return null
-        val sigBytes = Base64.getDecoder().decode(broadcast.signature)
         val hashBytes = Base64.getDecoder().decode(broadcast.fileHash)
-        return BleMetaPayload(fileIdBytes, broadcast.version, sigBytes, hashBytes, broadcast.compressedSize, broadcast.fileName)
+        val encrypted = File(fileService.getVersionDir(fileId, broadcast.version), "file.encrypted")
+        return BleMetaPayload(fileIdBytes, broadcast.version, hashBytes, encrypted.length(), broadcast.fileName)
     }
 
     suspend fun startAdvertising(broadcast: BroadcastEntity) {
@@ -407,14 +420,7 @@ class SyncEngine(
             }
             lastProbeAt[deviceAddress] = System.currentTimeMillis()
             // Use the public key from the broadcast entity (originator), not from META
-            val pubKey = cryptoService.publicKeyFromBase64(broadcast.publicKey)
             val hashHex = metaPayload.fileHash.joinToString("") { "%02x".format(it) }
-            val msg = cryptoService.buildSignatureMessage(broadcast.fileId, newVersion, hashHex)
-            if (!cryptoService.verify(msg, metaPayload.signature, pubKey)) {
-                EventLog.log("sync", "Signature check FAILED for relay update ${broadcast.fileId}")
-                Log.e(TAG, "Sig verify failed ${broadcast.fileId}"); return false
-            }
-            EventLog.log("gatt", "Meta verified for ${broadcast.fileName} v$newVersion")
             val tmpFile = fileService.getTmpFile(broadcast.fileId, newVersion)
             tmpFile.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IllegalStateException("Cannot create temporary download directory") }
             EventLog.log("ble", "Streaming ${broadcast.fileId} v$newVersion (${metaPayload.fileSize}B compressed) over GATT")
@@ -433,7 +439,9 @@ class SyncEngine(
                 EventLog.log("sync", "Downloaded file size mismatch for ${broadcast.fileId}: ${tmpFile.length()}/${metaPayload.fileSize}B")
                 tmpFile.delete(); return false
             }
-            // Decompress the received file
+            val encrypted = tmpFile.readBytes()
+            val compressed = try { cryptoService.decryptCompressed(encrypted, cryptoService.getRecipientPrivateKey(broadcast.publicKey) ?: return false) } catch (e: Exception) { tmpFile.delete(); EventLog.log("sync", "Decrypt failed: ${e.message}"); return false }
+            tmpFile.writeBytes(compressed)
             val internalFile = fileService.getFile(broadcast.fileId, newVersion)
             try {
                 fileService.decompressFile(tmpFile, internalFile)
@@ -447,19 +455,7 @@ class SyncEngine(
                 internalFile.delete(); EventLog.log("sync", "Hash mismatch after transfer of ${broadcast.fileId} - discarded")
                 return false
             }
-            val existingSignature = Base64.getEncoder().encodeToString(metaPayload.signature)
-            val privateKeyAlias = broadcast.privateKeyAlias
-            val sigToStore = if (privateKeyAlias != null) {
-                val privateKey = cryptoService.getPrivateKey(privateKeyAlias)
-                if (privateKey != null) {
-                    Base64.getEncoder().encodeToString(cryptoService.sign(cryptoService.buildSignatureMessage(broadcast.fileId, newVersion, receivedHash), privateKey))
-                } else {
-                    existingSignature
-                }
-            } else {
-                existingSignature
-            }
-            broadcastDao.updateVersion(broadcast.fileId, newVersion, Base64.getEncoder().encodeToString(metaPayload.fileHash), sigToStore, internalFile.absolutePath, internalFile.length(), metaPayload.fileSize, System.currentTimeMillis(), metaPayload.fileName.takeIf { it.isNotBlank() } ?: broadcast.fileName)
+            broadcastDao.updateVersion(broadcast.fileId, newVersion, Base64.getEncoder().encodeToString(metaPayload.fileHash), "", internalFile.absolutePath, internalFile.length(), encrypted.size.toLong(), System.currentTimeMillis(), metaPayload.fileName.takeIf { it.isNotBlank() } ?: broadcast.fileName)
             subscriptionDao.updateReceived(broadcast.fileId, newVersion, internalFile.absolutePath, newVersion, System.currentTimeMillis(), metaPayload.fileName.takeIf { it.isNotBlank() } ?: broadcast.fileName)
             EventLog.log("sync", "Subscription record updated to v$newVersion for ${broadcast.fileId}")
             fileService.evictOldVersions(broadcast.fileId, newVersion)
@@ -520,13 +516,7 @@ class SyncEngine(
             }
             lastProbeAt[deviceAddress] = System.currentTimeMillis()
             // Use the public key from the subscription (obtained from QR code/link), not from META
-            val pubKey = cryptoService.publicKeyFromBase64(subscription.publicKey)
             val hashHex = metaPayload.fileHash.joinToString("") { "%02x".format(it) }
-            val msg = cryptoService.buildSignatureMessage(subscription.fileId, newVersion, hashHex)
-            if (!cryptoService.verify(msg, metaPayload.signature, pubKey)) {
-                EventLog.log("sync", "Signature check FAILED for ${subscription.fileName ?: subscription.fileId}")
-                return@withTimeout
-            }
             EventLog.log("gatt", "Meta verified for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
             val tmpFile = fileService.getTmpFile(subscription.fileId, newVersion)
             tmpFile.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IllegalStateException("Cannot create temporary download directory") }
@@ -555,7 +545,8 @@ class SyncEngine(
                 EventLog.log("sync", "Transfer failed for ${subscription.fileId} (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)")
                 return@withTimeout
             }
-            // Decompress the received file
+            val compressed = try { cryptoService.decryptCompressed(tmpFile.readBytes(), cryptoService.getRecipientPrivateKey(subscription.publicKey) ?: throw IllegalStateException("No recipient private key")) } catch (e: Exception) { tmpFile.delete(); EventLog.log("sync", "Decrypt failed: ${e.message}"); return@withTimeout }
+            tmpFile.writeBytes(compressed)
             val internalFile = fileService.getFile(subscription.fileId, newVersion)
             try {
                 fileService.decompressFile(tmpFile, internalFile)
@@ -607,7 +598,7 @@ class SyncEngine(
             relayPayload[6] = ((newVersion ushr 24) and 0xFF).toByte(); relayPayload[7] = ((newVersion ushr 16) and 0xFF).toByte()
             relayPayload[8] = ((newVersion ushr 8) and 0xFF).toByte(); relayPayload[9] = (newVersion and 0xFF).toByte()
             cryptoService.keyId(subscription.publicKey).copyInto(relayPayload, 10)
-            broadcastDao.upsert(BroadcastEntity(subscription.fileId, resolvedFileName ?: "File", "application/octet-stream", internalFile.absolutePath, Base64.getEncoder().encodeToString(metaPayload.fileHash), internalFile.length(), metaPayload.fileSize, newVersion, subscription.publicKey, null, Base64.getEncoder().encodeToString(metaPayload.signature), Role.RELAY, subscription.subscribedAt, System.currentTimeMillis()))
+            broadcastDao.upsert(BroadcastEntity(subscription.fileId, resolvedFileName ?: "File", "application/octet-stream", internalFile.absolutePath, Base64.getEncoder().encodeToString(metaPayload.fileHash), internalFile.length(), metaPayload.fileSize, newVersion, subscription.publicKey, null, "", Role.RELAY, subscription.subscribedAt, System.currentTimeMillis()))
             blePeripheralService.startAdvertising(subscription.fileId, relayPayload)
             EventLog.log("adv", "Relaying \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
             onFileReceived?.invoke(subscription.fileId, newVersion)

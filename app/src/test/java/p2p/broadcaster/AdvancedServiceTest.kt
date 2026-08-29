@@ -75,7 +75,7 @@ class AdvancedServiceTest {
 
         var payload: BleMetaPayload? = null
         service.setMetaPayloadProvider { fileId ->
-            payload = BleMetaPayload(ByteArray(16), 1, ByteArray(64), ByteArray(32), 1024L, "test.bin")
+            payload = BleMetaPayload(ByteArray(16), 1, ByteArray(32), 1024L, "test.bin")
             payload
         }
 

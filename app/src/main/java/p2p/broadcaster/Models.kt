@@ -63,7 +63,6 @@ data class BleAdvertisement(
 data class BleMetaPayload(
     val fileId: ByteArray,
     val version: Int,
-    val signature: ByteArray,
     val fileHash: ByteArray,
     val fileSize: Long,
     val fileName: String
@@ -71,7 +70,7 @@ data class BleMetaPayload(
     companion object {
         // Fixed prefix size (everything except the variable-length fileName):
         // fileId 16B + version 4B + sig 64B + hash 32B + size 4B + nameLen 2B
-        const val FIXED_SIZE = 16 + 4 + 64 + 32 + 4 + 2
+        const val FIXED_SIZE = 16 + 4 + 32 + 4 + 2
         const val MAX_NAME_LEN = 65535
 
         fun fromBytes(data: ByteArray): BleMetaPayload? {
@@ -83,7 +82,6 @@ data class BleMetaPayload(
                 ((data[offset + 2].toInt() and 0xFF) shl 8) or
                 (data[offset + 3].toInt() and 0xFF)
             offset += 4
-            val signature = data.copyOfRange(offset, offset + 64); offset += 64
             val fileHash = data.copyOfRange(offset, offset + 32); offset += 32
             val fileSize = ((data[offset].toLong() and 0xFF) shl 24) or
                 ((data[offset + 1].toLong() and 0xFF) shl 16) or
@@ -95,7 +93,7 @@ data class BleMetaPayload(
             if (nameLen > MAX_NAME_LEN) return null
             if (data.size < FIXED_SIZE + nameLen) return null
             val fileName = String(data.copyOfRange(offset, offset + nameLen), Charsets.UTF_8)
-            return BleMetaPayload(fileId, version, signature, fileHash, fileSize, fileName)
+            return BleMetaPayload(fileId, version, fileHash, fileSize, fileName)
         }
     }
 
@@ -110,7 +108,6 @@ data class BleMetaPayload(
         out[offset + 2] = (version shr 8).toByte()
         out[offset + 3] = version.toByte()
         offset += 4
-        signature.copyInto(out, offset); offset += 64
         fileHash.copyInto(out, offset); offset += 32
         out[offset] = (fileSize shr 24).toByte()
         out[offset + 1] = (fileSize shr 16).toByte()
@@ -129,7 +126,6 @@ data class BleMetaPayload(
         if (other !is BleMetaPayload) return false
         return fileId.contentEquals(other.fileId) &&
             version == other.version &&
-            signature.contentEquals(other.signature) &&
             fileHash.contentEquals(other.fileHash) &&
             fileSize == other.fileSize &&
             fileName == other.fileName
@@ -138,7 +134,6 @@ data class BleMetaPayload(
     override fun hashCode(): Int {
         var result = fileId.contentHashCode()
         result = 31 * result + version
-        result = 31 * result + signature.contentHashCode()
         result = 31 * result + fileHash.contentHashCode()
         result = 31 * result + fileSize.hashCode()
         result = 31 * result + fileName.hashCode()

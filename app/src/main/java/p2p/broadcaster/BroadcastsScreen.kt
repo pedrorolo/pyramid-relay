@@ -86,7 +86,7 @@ class BroadcastsViewModel(
     fun importAndBroadcast(uri: Uri, context: android.content.Context) {
         viewModelScope.launch {
             val fileId = UUID.randomUUID().toString()
-            val keyPair = cryptoService.generateEd25519KeyPair()
+            val keyPair = cryptoService.generateRsaKeyPair()
             val publicKeyStr = cryptoService.publicKeyToBase64(keyPair.public)
             val alias = "sk_$fileId"
             cryptoService.storeKeyPair(alias, keyPair)
@@ -100,9 +100,7 @@ class BroadcastsViewModel(
             val file = fileService.getFile(fileId, version); file.writeBytes(fileBytes)
             val hashHex = cryptoService.sha256Hex(fileBytes)
             val hashStr = Base64.getEncoder().encodeToString(cryptoService.sha256(fileBytes))
-            val msg = cryptoService.buildSignatureMessage(fileId, version, hashHex)
-            val signature = cryptoService.sign(msg, keyPair.private)
-            val signatureStr = Base64.getEncoder().encodeToString(signature)
+            val signatureStr = ""
             broadcastDao.upsert(
                 BroadcastEntity(
                     fileId, fileName, mimeType, file.absolutePath, hashStr,
@@ -146,14 +144,12 @@ class BroadcastsViewModel(
             EventLog.log("adv", "updateBroadcast: wrote file to ${file.absolutePath}")
             val hashHex = cryptoService.sha256Hex(fileBytes)
             val hashStr = Base64.getEncoder().encodeToString(cryptoService.sha256(fileBytes))
-            val msg = cryptoService.buildSignatureMessage(broadcast.fileId, newVersion, hashHex)
             val privateKey = cryptoService.getPrivateKey(alias)
             if (privateKey == null) {
                 EventLog.log("adv", "updateBroadcast: CANCELLED - private key not found for alias $alias")
                 return@launch
             }
-            val signature = cryptoService.sign(msg, privateKey)
-            val signatureStr = Base64.getEncoder().encodeToString(signature)
+            val signatureStr = ""
             EventLog.log("adv", "updateBroadcast: stopping old advertisement")
             syncEngine?.stopAdvertisingForFile(broadcast.fileId)
             val effectiveFileName = newFileName.takeIf { it.isNotBlank() && it != "unknown" } ?: broadcast.fileName

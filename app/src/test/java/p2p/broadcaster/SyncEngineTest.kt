@@ -71,13 +71,13 @@ class SyncEngineTest {
     @Test
     fun `spec 10 - buildMetaPayload constructs correct payload for broadcast`() = runTest {
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val hashStr = java.util.Base64.getEncoder().encodeToString(cryptoService.sha256("data".toByteArray()))
 
         val broadcast = BroadcastEntity(
             fileId, "test.txt", "text/plain", "/path", hashStr,
-            1024, 1024, 1, pubKeyStr, "sk_$fileId", java.util.Base64.getEncoder().encodeToString(ByteArray(64)),
+            1024, 1024, 1, pubKeyStr, "sk_$fileId", "",
             Role.ORIGINATOR, 0L, 0L
         )
         coEvery { broadcastDao.getById(fileId) } returns broadcast
@@ -86,15 +86,13 @@ class SyncEngineTest {
         assertEquals(16, payload.fileId.size)
         assertEquals(1, payload.version)
         assertEquals(1024L, payload.fileSize)
-        // Public key is no longer in META payload - only signature, fileHash, fileName
-        assertEquals(64, payload.signature.size)
         assertEquals(32, payload.fileHash.size)
     }
 
     @Test
     fun `spec 8 - startAdvertising constructs 14 byte service data`() = runTest {
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val broadcast = BroadcastEntity(
             fileId, "test.txt", "text/plain", "/path", "abc",
@@ -119,7 +117,7 @@ class SyncEngineTest {
     @Test
     fun `spec 8 - startAdvertising version BE32 encoded at correct offset`() = runTest {
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val broadcast = BroadcastEntity(
             fileId, "f", "t", "p", "h", 0, 0, 0x01020304, pubKeyStr, null, "s",
@@ -148,7 +146,7 @@ class SyncEngineTest {
     @Test
     fun `spec 10 - dedup cache prevents duplicate handling`() = runTest {
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val subscription = SubscriptionEntity(
             fileId, pubKeyStr, "test.txt", null, null, 0L, null, null, null
@@ -173,7 +171,7 @@ class SyncEngineTest {
     @Test
     fun `spec 10 - skip if advertised version equals local broadcast version`() = runTest {
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val broadcast = BroadcastEntity(
             fileId, "test.txt", "text/plain", "/path", "abc",
@@ -198,7 +196,7 @@ class SyncEngineTest {
     @Test
     fun `spec 10 - skip if advertised version less than local subscription`() = runTest {
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val subscription = SubscriptionEntity(
             fileId, pubKeyStr, "test.txt", 5, "/path", 0L, 5, 0L, 5
@@ -221,7 +219,7 @@ class SyncEngineTest {
     @Test
     fun `spec 8 - handleDiscoveredDevice parses service data correctly`() = runTest {
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val subscription = SubscriptionEntity(
             fileId, pubKeyStr, "test.txt", null, null, 0L, null, null, null
@@ -251,7 +249,7 @@ class SyncEngineTest {
     @Test
     fun `spec 4 - SyncEngine uuidToBytes produces 16 bytes from UUID`() = runTest {
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val broadcast = BroadcastEntity(
             fileId, "f", "t", "p", java.util.Base64.getEncoder().encodeToString(ByteArray(32)), 0, 0, 1,
             cryptoService.publicKeyToBase64(kp.public), null, java.util.Base64.getEncoder().encodeToString(ByteArray(64)), Role.RELAY, 0, 0
@@ -265,7 +263,7 @@ class SyncEngineTest {
     @Test
     fun `spec 10 - handleDiscoveredDevice matches subscription by fileIdHash and keyId`() = runTest {
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val sub1 = SubscriptionEntity(fileId, pubKeyStr, "a", null, null, 0L, null, null, null)
         val sub2 = SubscriptionEntity(UUID.randomUUID().toString(), "otherpk", "b", null, null, 0L, null, null, null)
@@ -310,7 +308,7 @@ class SyncEngineTest {
     @Test
     fun `spec 10 - startAdvertising calls blePeripheral with correct service data`() = runTest {
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val broadcast = BroadcastEntity(
             fileId, "test.txt", "text/plain", "/path", "abc",
@@ -334,7 +332,7 @@ class SyncEngineTest {
     @Test
     fun `spec 10 - handleDiscoveredDevice skips when version less than or equal to local broadcast`() = runTest {
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val broadcast = BroadcastEntity(
             fileId, "test.txt", "text/plain", "/path", "abc",
@@ -372,7 +370,7 @@ class SyncEngineTest {
     @Test
     fun `spec 10 - buildMetaPayload with valid broadcast returns correct fields`() = runTest {
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val hashBytes = cryptoService.sha256("test data".toByteArray())
         val hashStr = java.util.Base64.getEncoder().encodeToString(hashBytes)
@@ -400,7 +398,7 @@ class SyncEngineTest {
     @Test
     fun `spec 8 - startAdvertising includes keyId at offset 10-13`() = runTest {
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val broadcast = BroadcastEntity(
             fileId, "test", "t", "/p", "h", 0, 0, 7, pubKeyStr, null, "s",
@@ -419,7 +417,7 @@ class SyncEngineTest {
     @Test
     fun `spec 8 - startAdvertising includes fileIdHash at offset 0-5`() = runTest {
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val broadcast = BroadcastEntity(
             fileId, "test", "t", "/p", "h", 0, 0, 3, pubKeyStr, null, "s",

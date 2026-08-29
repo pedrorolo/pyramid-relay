@@ -86,7 +86,7 @@ class ViewModelTest {
         advanceUntilIdle()
 
         val crypto = CryptoService()
-        val validPk = crypto.publicKeyToBase64(crypto.generateEd25519KeyPair().public)
+        val validPk = crypto.publicKeyToBase64(crypto.generateRsaKeyPair().public)
         vm.addSubscription("sub1", validPk, "name1")
         advanceUntilIdle()
 

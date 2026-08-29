@@ -143,7 +143,7 @@ class RemainingCoverageTest {
         val viewModel = SubscriptionsViewModel(subscriptionDao, broadcastDao, fileService, CryptoService())
 
         val crypto = CryptoService()
-        val validPk = crypto.publicKeyToBase64(crypto.generateEd25519KeyPair().public)
+        val validPk = crypto.publicKeyToBase64(crypto.generateRsaKeyPair().public)
         viewModel.addSubscription("sub1", validPk, "name1")
         advanceUntilIdle()
 

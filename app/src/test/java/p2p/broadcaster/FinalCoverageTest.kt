@@ -66,7 +66,7 @@ class FinalCoverageTest {
         )
 
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val broadcast = BroadcastEntity(fileId, "test.txt", "text/plain", "/path", "hash", 1024, 1024, 1, pubKeyStr, "sk", "sig", Role.ORIGINATOR, 0, 0)
         coEvery { broadcastDao.getAll() } returns listOf(broadcast)
@@ -106,7 +106,7 @@ class FinalCoverageTest {
         )
 
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val sub = SubscriptionEntity(fileId, pubKeyStr, "test.txt", null, null, 0, null, null, null)
         coEvery { subscriptionDao.getAll() } returns listOf(sub)
@@ -144,7 +144,7 @@ class FinalCoverageTest {
         )
 
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val hashBytes = cryptoService.sha256("test data".toByteArray())
         val hashStr = java.util.Base64.getEncoder().encodeToString(hashBytes)
