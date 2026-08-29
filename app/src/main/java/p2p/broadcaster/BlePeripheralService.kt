@@ -263,7 +263,9 @@ class BlePeripheralService(private val context: Context, private val transferSem
                 uploadSemaphore.release()
                 transferSemaphore.release()
                 // Transfer ended - notify callback to resume advertising/scanning
+                EventLog.log("ble", "pushStreamTo finally: invoking onTransferEnd")
                 onTransferEnd?.invoke()
+                EventLog.log("ble", "pushStreamTo finally: onTransferEnd done, invoking onUploadEnd")
                 onUploadEnd?.invoke(address)
                 pushing.remove(address)
                 val fId = streamToFileId.remove(address)

@@ -138,7 +138,10 @@ class SyncEngine(
             blePeripheralService.onUploadStart = { address -> activeUploadPeers.add(address) }
             blePeripheralService.onUploadEnd = { address -> activeUploadPeers.remove(address) }
             blePeripheralService.onTransferStart = { stopAdvertisingAndScanning() }
-            blePeripheralService.onTransferEnd = { resumeAdvertisingAndScanning() }
+            blePeripheralService.onTransferEnd = {
+                EventLog.log("sync", "onTransferEnd fired, resuming advertising/scanning")
+                resumeAdvertisingAndScanning()
+            }
             blePeripheralService.onStreamArmed = { stopAdvertisingAndScanning() }
             // Retry GATT server if initial attempt fails (permissions may not be ready yet after fresh install)
             for (attempt in 1..5) {
@@ -242,6 +245,7 @@ class SyncEngine(
     }
 
     fun resumeAdvertisingAndScanning() {
+        EventLog.log("sync", "resumeAdvertisingAndScanning called, scope active=${scope.coroutineContext[kotlinx.coroutines.Job]?.isActive}")
         scope.launch {
             try {
                 bleCentralService.startScan()
