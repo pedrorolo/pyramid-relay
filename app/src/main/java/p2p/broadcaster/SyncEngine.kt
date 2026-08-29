@@ -440,7 +440,7 @@ class SyncEngine(
             EventLog.log("sync", "Download started for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion from ${deviceAddress.takeLast(5)}")
         var downloadResult = false
         try {
-            withTimeout(90_000L) {
+            withTimeout(600_000L) {
             val fileIdHash = cryptoService.fileIdHash(subscription.fileId)
             val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
                 EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting fetch"); return@withTimeout
@@ -533,7 +533,7 @@ class SyncEngine(
             downloadResult = true
             }
         } catch (e: TimeoutCancellationException) {
-            EventLog.log("sync", "Download timed out for ${subscription.fileId} after 90s (retry ${downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1}/$maxRetries)")
+            EventLog.log("sync", "Download timed out for ${subscription.fileId} after 10min (retry ${downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1}/$maxRetries)")
             downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching sub update ${subscription.fileId}", e)
