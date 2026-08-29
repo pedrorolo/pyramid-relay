@@ -37,6 +37,7 @@ class BleCentralService(private val context: Context) {
     private var scanJob: Job? = null
     private var scanCallback: ScanCallback? = null
     private var lastNoServiceDataLogAt = 0L
+    private val activeGattConnections = java.util.concurrent.ConcurrentHashMap<String, BluetoothGatt>()
     var onDeviceDiscovered: ((deviceAddress: String, serviceData: ByteArray) -> Unit)? = null
 
     @SuppressLint("MissingPermission")
@@ -166,6 +167,22 @@ class BleCentralService(private val context: Context) {
 
     fun destroy() { stopScan(); scope.cancel() }
 
+    fun disconnectDevice(deviceAddress: String) {
+        activeGattConnections.remove(deviceAddress)?.let {
+            try {
+                it.disconnect()
+                it.close()
+                EventLog.log("ble", "Disconnected from ${deviceAddress.takeLast(5)}")
+            } catch (e: Exception) {
+                EventLog.log("ble", "Error disconnecting from ${deviceAddress.takeLast(5)}: ${e.message}")
+            }
+        }
+    }
+
+    fun disconnectAll() {
+        activeGattConnections.keys.toList().forEach { disconnectDevice(it) }
+    }
+
     /**
      * Downloads a file from a peripheral over GATT: connects, negotiates MTU,
      * writes "PULL v<version>" to the STREAM characteristic, then reads chunks
@@ -198,6 +215,7 @@ class BleCentralService(private val context: Context) {
                         }
                         deferred.complete(false)
                     }
+                    activeGattConnections.remove(deviceAddress)
                     gatt.close()
                 }
             }
@@ -249,12 +267,13 @@ class BleCentralService(private val context: Context) {
                         deferred.complete(false); 
                         return 
                     }
-                    deferred.complete(true)
+                     deferred.complete(true)
+                    activeGattConnections.remove(deviceAddress)
                     gatt.disconnect(); gatt.close(); gattRef = null
                 }
             }
         }
-        device.connectGatt(context, false, gattCallback, android.bluetooth.BluetoothDevice.TRANSPORT_LE).also { gattRef = it }
+        device.connectGatt(context, false, gattCallback, android.bluetooth.BluetoothDevice.TRANSPORT_LE).also { gattRef = it; activeGattConnections[deviceAddress] = it }
             ?: run { EventLog.log("ble", "fetchFile: connectGatt returned null for ${deviceAddress.takeLast(5)}"); return false }
         EventLog.log("ble", "GATT fetchFile v$version ($expectedSize B) from ${deviceAddress.takeLast(5)}")
         // 30s handshake + conservative 20 KB/s transfer budget

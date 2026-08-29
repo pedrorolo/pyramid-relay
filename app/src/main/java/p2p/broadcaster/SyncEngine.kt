@@ -65,6 +65,7 @@ class SyncEngine(
     private val _downloadingFileIds = MutableStateFlow<Set<String>>(emptySet())
     val downloadingFileIds: StateFlow<Set<String>> = _downloadingFileIds.asStateFlow()
     private val activeDownloadJobs = ConcurrentHashMap<String, Job>()
+    private val downloadingFileDeviceMap = ConcurrentHashMap<String, String>()
     private val downloadMutex = Mutex()
     private val downloadSemaphore = Semaphore(1) // Only one download at a time
     private val uploadSemaphore = Semaphore(1) // Only one upload at a time
@@ -391,6 +392,7 @@ class SyncEngine(
             _downloadingFileIds.value = _downloadingFileIds.value + broadcast.fileId
             activeDownloadPeers.add(deviceAddress)
             activeDownloadJobs[broadcast.fileId] = currentCoroutineContext()[Job]!!
+            downloadingFileDeviceMap[broadcast.fileId] = deviceAddress
             stopAdvertisingAndScanning()
             EventLog.log("sync", "Download started for \"${broadcast.fileName}\" v$newVersion from ${deviceAddress.takeLast(5)}")
         try {
@@ -466,6 +468,7 @@ class SyncEngine(
             activeDownloadPeers.remove(deviceAddress)
             _downloadingFileIds.value = _downloadingFileIds.value - broadcast.fileId
             _downloadProgress.value = _downloadProgress.value - broadcast.fileId
+            downloadingFileDeviceMap.remove(broadcast.fileId)
             activeDownloadJobs.remove(broadcast.fileId)
             resumeAdvertisingAndScanning()
             EventLog.log("sync", "Download finished for \"${broadcast.fileName}\"")
@@ -500,6 +503,7 @@ class SyncEngine(
             _downloadingFileIds.value = _downloadingFileIds.value + subscription.fileId
             activeDownloadPeers.add(deviceAddress)
             activeDownloadJobs[subscription.fileId] = currentCoroutineContext()[Job]!!
+            downloadingFileDeviceMap[subscription.fileId] = deviceAddress
             stopAdvertisingAndScanning()
             EventLog.log("sync", "Download started for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion from ${deviceAddress.takeLast(5)}")
         var downloadResult = false
@@ -614,6 +618,7 @@ class SyncEngine(
         if (!downloadResult) {
             _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId
             _downloadProgress.value = _downloadProgress.value - subscription.fileId
+            downloadingFileDeviceMap.remove(subscription.fileId)
             activeDownloadJobs.remove(subscription.fileId)
             resumeAdvertisingAndScanning()
             return false
@@ -621,6 +626,7 @@ class SyncEngine(
         activeDownloadPeers.remove(deviceAddress)
         _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId
         _downloadProgress.value = _downloadProgress.value - subscription.fileId
+        downloadingFileDeviceMap.remove(subscription.fileId)
         activeDownloadJobs.remove(subscription.fileId)
         resumeAdvertisingAndScanning()
         return true
@@ -639,6 +645,11 @@ class SyncEngine(
         activeDownloadJobs.remove(fileId)?.let {
             it.cancel()
             EventLog.log("sync", "Cancelled active download for ${fileId.takeLast(8)}")
+        }
+        // Disconnect from the device to notify the sender that the transfer was cancelled
+        downloadingFileDeviceMap.remove(fileId)?.let { deviceAddress ->
+            bleCentralService.disconnectDevice(deviceAddress)
+            EventLog.log("sync", "Disconnected from ${deviceAddress.takeLast(5)} for cancelled transfer ${fileId.takeLast(8)}")
         }
         blePeripheralService.stopStreaming(fileId)
     }

@@ -286,6 +286,8 @@ class BlePeripheralService(private val context: Context, private val transferSem
             pushing.remove(address)
             _activeStreamingFileIds.value = _activeStreamingFileIds.value - fileId
             _streamingProgress.value = _streamingProgress.value - fileId
+            // Disconnect the central to notify it that the stream was stopped
+            gattServer?.cancelConnection(connectedDevice(address))
             EventLog.log("ble", "Stopped streaming ${fileId.takeLast(8)} to ${address.takeLast(5)}")
         }
     }
