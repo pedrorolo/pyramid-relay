@@ -2,8 +2,6 @@ package p2p.broadcaster
 
 import android.content.Intent
 import android.net.Uri
-import android.os.Environment
-import android.provider.MediaStore
 import java.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -215,38 +213,32 @@ fun BroadcastsScreen(
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
                 items(broadcasts, key = { it.fileId }) { broadcast ->
-                    fun saveAndOpen() {
-                        try {
+                    val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri: Uri? ->
+                        uri?.let { saveUri ->
                             val source = app.fileService.getFile(broadcast.fileId, broadcast.version)
-                            if (!source.isFile || source.length() == 0L) return
-                            val fileName = broadcast.fileName
-                            val resolver = context.contentResolver
-                            resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Downloads._ID), "${MediaStore.Downloads.DISPLAY_NAME}=?", arrayOf(fileName), null)?.use { c ->
-                                if (c.moveToFirst()) {
-                                    val id = c.getLong(c.getColumnIndexOrThrow(MediaStore.Downloads._ID))
-                                    resolver.delete(MediaStore.Downloads.getContentUri("external"), "${MediaStore.Downloads._ID}=?", arrayOf(id.toString()))
-                                }
-                            }
-                            val values = android.content.ContentValues().apply {
-                                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                                put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
-                                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                            }
-                            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return
-                            resolver.openOutputStream(uri)?.use { out -> source.inputStream().use { it.copyTo(out) } }
-                            EventLog.log("app", "Saved \"$fileName\" to Downloads (${source.length()}B)")
+                            if (!source.isFile || source.length() == 0L) return@rememberLauncherForActivityResult
                             try {
-                                val openIntent = Intent(Intent.ACTION_VIEW).apply {
-                                    setDataAndType(uri, resolver.getType(uri) ?: "application/octet-stream")
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                context.contentResolver.openOutputStream(saveUri)?.use { out -> source.inputStream().use { it.copyTo(out) } }
+                                EventLog.log("app", "Saved \"${broadcast.fileName}\" to $saveUri (${source.length()}B)")
+                                // Auto-open the saved file
+                                try {
+                                    val openIntent = Intent(Intent.ACTION_VIEW).apply {
+                                        setDataAndType(saveUri, context.contentResolver.getType(saveUri) ?: "application/octet-stream")
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(openIntent)
+                                } catch (e: Exception) {
+                                    EventLog.log("app", "No app to open file: ${e.message}")
                                 }
-                                context.startActivity(openIntent)
                             } catch (e: Exception) {
-                                EventLog.log("app", "No app to open file: ${e.message}")
+                                EventLog.log("app", "Failed to save/open: ${e.message}")
                             }
-                        } catch (e: Exception) {
-                            EventLog.log("app", "Failed to save/open: ${e.message}")
                         }
+                    }
+                    fun saveAndOpen() {
+                        val source = app.fileService.getFile(broadcast.fileId, broadcast.version)
+                        if (!source.isFile || source.length() == 0L) return
+                        saveLauncher.launch(broadcast.fileName)
                     }
                     Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                         val filePath = remember(broadcast.fileId, broadcast.version) {

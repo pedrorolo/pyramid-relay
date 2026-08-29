@@ -271,6 +271,16 @@ fun SubscriptionRow(
         try {
             context.contentResolver.openOutputStream(uri)?.use { out -> source.inputStream().use { it.copyTo(out) } }
             EventLog.log("app", "Saved \"${subscription.fileName}\" to selected location (${source.length()}B)")
+            // Auto-open the saved file
+            try {
+                val openIntent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, context.contentResolver.getType(uri) ?: "application/octet-stream")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(openIntent)
+            } catch (e: Exception) {
+                EventLog.log("app", "No app to open file: ${e.message}")
+            }
         } catch (e: Exception) {
             EventLog.log("app", "Failed to save file: ${e.message}")
         }
