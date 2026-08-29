@@ -157,7 +157,7 @@ class BleCentralService(private val context: Context) {
             }
             device.connectGatt(context, false, gattCallback, android.bluetooth.BluetoothDevice.TRANSPORT_LE)
             EventLog.log("ble", "GATT connect to ${deviceAddress.takeLast(5)} for meta read (attempt $attemptNo)")
-            val result = try { withTimeout(30_000L) { deferred.await() } } catch (e: Exception) { Log.e(TAG, "Timeout reading meta from $deviceAddress", e); EventLog.log("ble", "Meta read TIMED OUT from ${deviceAddress.takeLast(5)} (attempt $attemptNo)"); null }
+            val result = try { withTimeout(90_000L) { deferred.await() } } catch (e: Exception) { Log.e(TAG, "Timeout reading meta from $deviceAddress", e); EventLog.log("ble", "Meta read TIMED OUT from ${deviceAddress.takeLast(5)} (attempt $attemptNo)"); null }
             if (result != null) return result
             kotlinx.coroutines.delay(300)
         }

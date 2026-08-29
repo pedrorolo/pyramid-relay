@@ -46,8 +46,8 @@ class BlePeripheralService(private val context: Context, private val transferSem
     @Volatile private var rotationRunning = false
     private var rotationThread: Thread? = null
     private var currentAdCallback: AdvertiseCallback? = null
-    // The fileId whose meta the single META characteristic serves.
-    private var servicedFileId: String? = null
+    // Each central keeps its own selected file; multiple peers may be connected.
+    private val selectedFileByCentral = java.util.concurrent.ConcurrentHashMap<String, String>()
     // Maps 6-byte fileIdHash hex -> fileId so the central can SELECT which file to serve.
     private val fileHashToFileId = java.util.concurrent.ConcurrentHashMap<String, String>()
     private var metaPayloadProvider: (suspend (String) -> BleMetaPayload?)? = null
@@ -103,6 +103,7 @@ class BlePeripheralService(private val context: Context, private val transferSem
                     EventLog.log("ble", "Broadcaster: central $addr DISCONNECTED (status=$status)")
                     device?.address?.let { addr ->
                         val fId = streamToFileId.remove(addr)
+                        selectedFileByCentral.remove(addr)
                         if (fId != null) {
                             _activeStreamingFileIds.value = _activeStreamingFileIds.value - fId
                             _streamingProgress.value = _streamingProgress.value - fId
@@ -116,7 +117,7 @@ class BlePeripheralService(private val context: Context, private val transferSem
                 val char = characteristic ?: return
                 val dev = device?.address?.takeLast(5) ?: "?"
                 if (char.uuid == META_UUID) {
-                    val fileId = servicedFileId
+                    val fileId = device?.address?.let { selectedFileByCentral[it] }
                     val payload = if (fileId != null) runBlocking { metaPayloadProvider?.invoke(fileId) } else null
                     EventLog.log("ble", "Read META request from $dev (fileId=${fileId?.takeLast(8)}, offset=$offset, payload=${if (payload != null) "${payload.toBytes().size}B" else "NULL"})")
                     if (payload != null) {
@@ -147,7 +148,7 @@ class BlePeripheralService(private val context: Context, private val transferSem
                         val hexHash = cmd.substringAfter("SELECT ").trim()
                         val matchFileId = fileHashToFileId[hexHash]
                         if (matchFileId != null) {
-                            servicedFileId = matchFileId
+                            selectedFileByCentral[device.address] = matchFileId
                             EventLog.log("ble", "SELECT $hexHash -> ${matchFileId.takeLast(8)}")
                             if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
                         } else {
@@ -157,7 +158,7 @@ class BlePeripheralService(private val context: Context, private val transferSem
                         return
                     }
                     val version = Regex("PULL v(\\d+)").find(cmd)?.groupValues?.get(1)?.toIntOrNull()
-                    val fileId = servicedFileId
+                    val fileId = selectedFileByCentral[device.address]
                     if (version == null || fileId == null) {
                         EventLog.log("ble", "Bad stream request \"${cmd.take(40)}\" from ${device.address.takeLast(5)}")
                         if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null)
@@ -311,7 +312,6 @@ class BlePeripheralService(private val context: Context, private val transferSem
         fileHashToFileId[hashHex] = fileId
         EventLog.log("ble", "Advertising queued: $fileId (total=${advertisingFiles.size})")
         if (advertisingFiles.size == 1) {
-            servicedFileId = fileId
             startAdWithCurrentFile()
         }
         startRotationIfNeeded()
@@ -325,7 +325,6 @@ class BlePeripheralService(private val context: Context, private val transferSem
         // Stop any existing ad first.
         currentAdCallback?.let { try { adv.stopAdvertising(it) } catch (_: Exception) {} }
         val (fileId, serviceData) = advertisingFiles[currentAdIndex % advertisingFiles.size]
-        servicedFileId = fileId
         _currentAdvertisingFileId.value = fileId
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
@@ -399,7 +398,7 @@ class BlePeripheralService(private val context: Context, private val transferSem
                 try { advertiser?.stopAdvertising(cb) } catch (_: Exception) {}
                 currentAdCallback = null
             }
-            servicedFileId = null
+            selectedFileByCentral.clear()
             EventLog.log("ble", "Advertising stopped (no files)")
         } else if (advertisingFiles.size == 1) {
             // Down to one file — stop rotation, switch to static advertising.
@@ -428,7 +427,7 @@ class BlePeripheralService(private val context: Context, private val transferSem
             currentAdCallback = null
         }
         fileHashToFileId.clear()
-        servicedFileId = null
+        selectedFileByCentral.clear()
         _currentAdvertisingFileId.value = null
     }
 

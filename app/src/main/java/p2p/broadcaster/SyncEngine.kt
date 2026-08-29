@@ -135,11 +135,14 @@ class SyncEngine(
                         null
                     } else {
                         val encrypted = File(fileService.getVersionDir(fileId, version), "file.encrypted")
-                        if (!encrypted.exists()) {
+                        if (encrypted.exists()) {
+                            EventLog.log("ble", "Serving persisted encrypted envelope for ${fileId.takeLast(8)} v$version (${encrypted.length()}B)")
+                        } else {
                             val compressed = fileService.getCompressedFile(fileId, version).readBytes()
                             val privateKey = broadcast.privateKeyAlias?.let { cryptoService.getPrivateKey(it) }
                                 ?: throw IllegalStateException("No private key for originator payload")
                             encrypted.writeBytes(cryptoService.encryptCompressed(compressed, privateKey))
+                            EventLog.log("ble", "Created encrypted envelope for originator ${fileId.takeLast(8)} v$version (${encrypted.length()}B)")
                         }
                         encrypted.readBytes()
                     }
@@ -369,15 +372,15 @@ class SyncEngine(
                 EventLog.log("scan", "Matched relay copy \"${selfMatch.fileName}\" v${selfMatch.version} -> fetching v$version")
                 return fetchAndUpdateBroadcast(selfMatch, version, deviceAddress)
             } else {
-                // Same file hash but different key = relay copy from another device.
-                // Create/update a subscription so we can verify and re-advertise it.
-                EventLog.log("scan", "Relay copy of \"${selfMatch.fileName}\" from different key -> subscribing")
-                val relayPubKey = keyId.joinToString("") { "%02x".format(it) }
-                val sub = subscriptionDao.getById(selfMatch.fileId)
-                if (sub == null) {
-                    subscriptionDao.upsert(SubscriptionEntity(selfMatch.fileId, relayPubKey, selfMatch.fileName, null, null, System.currentTimeMillis(), version, System.currentTimeMillis(), null))
+                // The advertisement contains only a 4-byte key ID. Never turn it
+                // into a public key: the full key must come from the QR/link.
+                // A local broadcast with a different key is not enough to trust
+                // the peer's envelope.
+                EventLog.log("scan", "Ignoring \"${selfMatch.fileName}\" advertisement with unknown key ID")
+                val subscription = subscriptionDao.getById(selfMatch.fileId)
+                if (subscription == null || !cryptoService.keyId(subscription.publicKey).contentEquals(keyId)) {
+                    return false
                 }
-                val subscription = subscriptionDao.getById(selfMatch.fileId)!!
                 if (version <= (subscription.localVersion ?: 0)) {
                     EventLog.log("scan", "\"${subscription.fileName ?: subscription.fileId}\" already at v${subscription.localVersion} - adv v$version not newer, skipped")
                     return false
@@ -563,8 +566,13 @@ class SyncEngine(
                 EventLog.log("sync", "Transfer failed for ${subscription.fileId} (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)")
                 return@withTimeout
             }
+            val encrypted = tmpFile.readBytes()
+            val persistedEnvelope = File(fileService.getVersionDir(subscription.fileId, newVersion), "file.encrypted")
+            persistedEnvelope.parentFile?.mkdirs()
+            persistedEnvelope.writeBytes(encrypted)
+            EventLog.log("sync", "Persisted original encrypted envelope ${persistedEnvelope.absolutePath} (${persistedEnvelope.length()}B)")
             val compressed = try {
-                cryptoService.decryptCompressed(tmpFile.readBytes(), cryptoService.publicKeyFromBase64(subscription.publicKey))
+                cryptoService.decryptCompressed(encrypted, cryptoService.publicKeyFromBase64(subscription.publicKey))
             } catch (e: Exception) { tmpFile.delete(); EventLog.log("sync", "Decrypt failed: ${e.message}"); return@withTimeout }
             tmpFile.writeBytes(compressed)
             val internalFile = fileService.getFile(subscription.fileId, newVersion)
