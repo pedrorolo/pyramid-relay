@@ -52,7 +52,12 @@ class SyncEngine(
     // do not probe that device again for PROBE_COOLDOWN_MS.
     private val lastProbeAt = ConcurrentHashMap<String, Long>()
     private val advertisedFiles = ConcurrentHashMap.newKeySet<String>()
+    private val peerLocks = ConcurrentHashMap<String, Mutex>()
+    private val activeDownloadPeers = ConcurrentHashMap.newKeySet<String>()
+    private val activeUploadPeers = ConcurrentHashMap.newKeySet<String>()
     var onFileReceived: ((fileId: String, version: Int) -> Unit)? = null
+
+    private fun peerLock(address: String): Mutex = peerLocks.getOrPut(address) { Mutex() }
 
     private val _downloadingFileIds = MutableStateFlow<Set<String>>(emptySet())
     val downloadingFileIds: StateFlow<Set<String>> = _downloadingFileIds.asStateFlow()
@@ -87,6 +92,11 @@ class SyncEngine(
                 if (!file.exists()) throw IllegalStateException("Requested file not available: $fileId v$version")
                 file.inputStream().use { it.copyTo(output) }
             }
+            blePeripheralService.isPeerTransferAllowed = { address -> !activeDownloadPeers.contains(address) }
+            blePeripheralService.onUploadStart = { address -> activeUploadPeers.add(address) }
+            blePeripheralService.onUploadEnd = { address -> activeUploadPeers.remove(address) }
+            blePeripheralService.onTransferStart = { stopAdvertisingAndScanning() }
+            blePeripheralService.onTransferEnd = { resumeAdvertisingAndScanning() }
             // Retry GATT server if initial attempt fails (permissions may not be ready yet after fresh install)
             for (attempt in 1..5) {
                 try { blePeripheralService.startGattServer(); break } catch (e: Exception) {
@@ -171,6 +181,31 @@ class SyncEngine(
         engineJob?.cancel(); engineJob = null
         bleCentralService.stopScan()
         blePeripheralService.stopAllAdvertising()
+    }
+
+    fun stopAdvertisingAndScanning() {
+        bleCentralService.stopScan()
+        blePeripheralService.stopAllAdvertising()
+        EventLog.log("sync", "Stopped advertising and scanning for transfer")
+    }
+
+    fun resumeAdvertisingAndScanning() {
+        scope.launch {
+            try {
+                bleCentralService.startScan()
+                val broadcasts = broadcastDao.getAll()
+                for (b in broadcasts) {
+                    try {
+                        startAdvertising(b)
+                    } catch (e: Exception) {
+                        EventLog.log("ble", "resumeAdvertising failed: ${e.message}")
+                    }
+                }
+                EventLog.log("sync", "Resumed advertising and scanning after transfer")
+            } catch (e: Exception) {
+                EventLog.log("sync", "resumeAdvertisingAndScanning failed: ${e.message}")
+            }
+        }
     }
 
     suspend fun buildMetaPayload(fileId: String): BleMetaPayload? {
@@ -284,10 +319,17 @@ class SyncEngine(
                 return false
             }
         }
-        // Only one transfer (upload OR download) at a time
+        // Wait if there's an active upload to this peer
+        while (activeUploadPeers.contains(deviceAddress)) {
+            kotlinx.coroutines.delay(100)
+        }
+        // Only one transfer (upload OR download) at a time, and only one transfer per peer
         transferSemaphore.withPermit {
         downloadSemaphore.withPermit {
+        peerLock(deviceAddress).withLock {
             _downloadingFileIds.value = _downloadingFileIds.value + broadcast.fileId
+            activeDownloadPeers.add(deviceAddress)
+            stopAdvertisingAndScanning()
             EventLog.log("sync", "Download started for \"${broadcast.fileName}\" v$newVersion from ${deviceAddress.takeLast(5)}")
         try {
             val fileIdHash = cryptoService.fileIdHash(broadcast.fileId)
@@ -351,10 +393,13 @@ class SyncEngine(
             return true
         } catch (e: Exception) { Log.e(TAG, "Error fetching update ${broadcast.fileId}", e); EventLog.log("sync", "Error fetching update ${broadcast.fileId}: ${e.message}"); return false }
         finally {
+            activeDownloadPeers.remove(deviceAddress)
             _downloadingFileIds.value = _downloadingFileIds.value - broadcast.fileId
             _downloadProgress.value = _downloadProgress.value - broadcast.fileId
+            resumeAdvertisingAndScanning()
             EventLog.log("sync", "Download finished for \"${broadcast.fileName}\"")
         }
+        } // peerLock
         } // transferSemaphore
         }
     }
@@ -374,9 +419,16 @@ class SyncEngine(
                 return false
             }
         }
-        // Only one download at a time
+        // Wait if there's an active upload to this peer
+        while (activeUploadPeers.contains(deviceAddress)) {
+            kotlinx.coroutines.delay(100)
+        }
+        // Only one download at a time, and only one transfer per peer
         downloadSemaphore.withPermit {
+        peerLock(deviceAddress).withLock {
             _downloadingFileIds.value = _downloadingFileIds.value + subscription.fileId
+            activeDownloadPeers.add(deviceAddress)
+            stopAdvertisingAndScanning()
             EventLog.log("sync", "Download started for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion from ${deviceAddress.takeLast(5)}")
         var downloadResult = false
         try {
@@ -482,11 +534,15 @@ class SyncEngine(
         if (!downloadResult) {
             _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId
             _downloadProgress.value = _downloadProgress.value - subscription.fileId
+            resumeAdvertisingAndScanning()
             return false
         }
+        activeDownloadPeers.remove(deviceAddress)
         _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId
         _downloadProgress.value = _downloadProgress.value - subscription.fileId
+        resumeAdvertisingAndScanning()
         return true
+        } // peerLock
         }
     }
 

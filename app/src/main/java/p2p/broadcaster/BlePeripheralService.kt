@@ -74,6 +74,9 @@ class BlePeripheralService(private val context: Context, private val transferSem
 
     var onTransferStart: (() -> Unit)? = null
     var onTransferEnd: (() -> Unit)? = null
+    var isPeerTransferAllowed: ((String) -> Boolean)? = null
+    var onUploadStart: ((String) -> Unit)? = null
+    var onUploadEnd: ((String) -> Unit)? = null
 
     @SuppressLint("MissingPermission")
     fun startGattServer() {
@@ -220,8 +223,13 @@ class BlePeripheralService(private val context: Context, private val transferSem
             try {
                 uploadSemaphore.acquire()
                 runBlocking { transferSemaphore.acquire() }
+                // Wait until peer is not transferring to us
+                while (isPeerTransferAllowed?.invoke(address) == false) {
+                    Thread.sleep(100)
+                }
                 // Transfer actually starting - notify callback to stop advertising/scanning
                 onTransferStart?.invoke()
+                onUploadStart?.invoke(address)
                 val server = gattServer ?: return@Thread
                 val char = streamCharacteristic() ?: return@Thread
                 var logged = 0
@@ -254,6 +262,7 @@ class BlePeripheralService(private val context: Context, private val transferSem
                 transferSemaphore.release()
                 // Transfer ended - notify callback to resume advertising/scanning
                 onTransferEnd?.invoke()
+                onUploadEnd?.invoke(address)
                 pushing.remove(address)
                 val fId = streamToFileId.remove(address)
                 if (fId != null) {
