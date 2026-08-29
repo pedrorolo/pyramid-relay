@@ -77,6 +77,7 @@ class SyncEngine(
 
     val activeStreamingFileIds: StateFlow<Set<String>> get() = blePeripheralService.activeStreamingFileIds
     val streamingProgress: StateFlow<Map<String, Float>> get() = blePeripheralService.streamingProgress
+    val currentAdvertisingFileId: StateFlow<String?> get() = blePeripheralService.currentAdvertisingFileId
 
     private val bluetoothStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {

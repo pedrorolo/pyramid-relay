@@ -70,6 +70,7 @@ class BroadcastsViewModel(
     val relayingFileIds: StateFlow<Set<String>> get() = syncEngine?.activeStreamingFileIds ?: MutableStateFlow(emptySet())
     val downloadProgress: StateFlow<Map<String, Float>> get() = syncEngine?.downloadProgress ?: MutableStateFlow(emptyMap())
     val streamingProgress: StateFlow<Map<String, Float>> get() = syncEngine?.streamingProgress ?: MutableStateFlow(emptyMap())
+    val currentAdvertisingFileId: StateFlow<String?> get() = syncEngine?.currentAdvertisingFileId ?: MutableStateFlow(null)
 
     init {
         viewModelScope.launch { refresh() }
@@ -179,6 +180,7 @@ fun BroadcastsScreen(
     val activeStreamingFileIds by viewModel.relayingFileIds.collectAsState()
     val downloadProgress by viewModel.downloadProgress.collectAsState()
     val streamingProgress by viewModel.streamingProgress.collectAsState()
+    val currentAdvertisingFileId by viewModel.currentAdvertisingFileId.collectAsState()
     val pickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let { viewModel.importAndBroadcast(it, context) }
     }
@@ -245,20 +247,24 @@ fun BroadcastsScreen(
                             app.fileService.getFile(broadcast.fileId, broadcast.version).absolutePath
                         }
                         val isStreaming = activeStreamingFileIds.contains(broadcast.fileId)
-                        val statusText = if (isStreaming) "Relaying" else "Advertising"
+                        val isAdvertising = currentAdvertisingFileId == broadcast.fileId && !isStreaming
+                        val statusText = when {
+                            isStreaming -> "Relaying"
+                            isAdvertising -> "Advertising"
+                            else -> "Idle"
+                        }
                         // Log status for debugging
-                        android.util.Log.d("BroadcastsScreen", "Status for ${broadcast.fileName}: $statusText (isStreaming=$isStreaming)")
+                        android.util.Log.d("BroadcastsScreen", "Status for ${broadcast.fileName}: $statusText (isStreaming=$isStreaming, isAdvertising=$isAdvertising)")
 
                         Row(modifier = Modifier.fillMaxWidth().padding(12.dp).height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(broadcast.fileName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.clickable { saveAndOpen() })
                                 val compressedText = if (broadcast.compressedSize in 1 until broadcast.fileSize) " (compressed ${formatSize(broadcast.compressedSize)})" else ""
                                 Text("v${broadcast.version} | ${formatSize(broadcast.fileSize)}$compressedText", style = MaterialTheme.typography.bodySmall)
-                                Text(statusText, style = MaterialTheme.typography.bodySmall, color = if (isStreaming) androidx.compose.ui.graphics.Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary)
+                                Text(statusText, style = MaterialTheme.typography.bodySmall, color = if (isStreaming || isAdvertising) androidx.compose.ui.graphics.Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant)
                                 if (isStreaming) {
                                     val relayProgress = streamingProgress[broadcast.fileId] ?: 0f
                                     if (relayProgress >= 0.99f || relayProgress == 0f) {
-                                        // Indeterminate: waiting for receiver or no data yet
                                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
                                     } else {
                                         LinearProgressIndicator(
@@ -266,6 +272,8 @@ fun BroadcastsScreen(
                                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                                         )
                                     }
+                                } else if (isAdvertising) {
+                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
                                 }
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {

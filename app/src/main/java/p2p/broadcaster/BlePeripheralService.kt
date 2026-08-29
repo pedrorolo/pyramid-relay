@@ -65,6 +65,8 @@ class BlePeripheralService(private val context: Context, private val transferSem
     private val streamToFileId = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val _streamingProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
     val streamingProgress: StateFlow<Map<String, Float>> = _streamingProgress.asStateFlow()
+    private val _currentAdvertisingFileId = MutableStateFlow<String?>(null)
+    val currentAdvertisingFileId: StateFlow<String?> = _currentAdvertisingFileId.asStateFlow()
 
     fun setServeFileLoader(loader: (fileId: String, version: Int) -> ByteArray?) { serveFileLoaderField = loader }
 
@@ -324,6 +326,7 @@ class BlePeripheralService(private val context: Context, private val transferSem
         currentAdCallback?.let { try { adv.stopAdvertising(it) } catch (_: Exception) {} }
         val (fileId, serviceData) = advertisingFiles[currentAdIndex % advertisingFiles.size]
         servicedFileId = fileId
+        _currentAdvertisingFileId.value = fileId
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setConnectable(true).setTimeout(0)
@@ -426,6 +429,7 @@ class BlePeripheralService(private val context: Context, private val transferSem
         }
         fileHashToFileId.clear()
         servicedFileId = null
+        _currentAdvertisingFileId.value = null
     }
 
     @SuppressLint("MissingPermission")

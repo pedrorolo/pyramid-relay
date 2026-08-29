@@ -91,6 +91,8 @@ class SubscriptionsViewModel(
         get() = syncEngine?.downloadProgress ?: MutableStateFlow(
             emptyMap()
         )
+    val currentAdvertisingFileId: StateFlow<String?>
+        get() = syncEngine?.currentAdvertisingFileId ?: MutableStateFlow(null)
 
     init {
         viewModelScope.launch { refresh() }
@@ -165,6 +167,7 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
     val downloadingFileIds by viewModel.downloadingFileIds.collectAsState()
     val activeStreamingFileIds by viewModel.activeStreamingFileIds.collectAsState()
     val downloadProgress by viewModel.downloadProgress.collectAsState()
+    val currentAdvertisingFileId by viewModel.currentAdvertisingFileId.collectAsState()
     var showPasteDialog by remember { mutableStateOf(false) }
     var showQrScan by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf<SubscriptionEntity?>(null) }
@@ -195,6 +198,7 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
                             subscription = subscription,
                             isDownloading = downloadingFileIds.contains(subscription.fileId),
                             isStreaming = activeStreamingFileIds.contains(subscription.fileId),
+                            isAdvertising = currentAdvertisingFileId == subscription.fileId,
                             progress = downloadProgress[subscription.fileId] ?: 0f,
                             onDelete = { showDeleteConfirm = subscription }
                         )
@@ -256,6 +260,7 @@ fun SubscriptionRow(
     subscription: SubscriptionEntity,
     isDownloading: Boolean = false,
     isStreaming: Boolean = false,
+    isAdvertising: Boolean = false,
     progress: Float = 0f,
     onDelete: () -> Unit
 ) {
@@ -305,13 +310,14 @@ fun SubscriptionRow(
         val status = when {
             isDownloading -> "Downloading"
             isStreaming -> "Relaying"
+            isAdvertising && subscription.localVersion != null -> "Advertising"
             subscription.localVersion == null -> "Searching"
-            else -> "Advertising"
+            else -> "Scanning Updates"
         }
         // Log status for debugging
         android.util.Log.d(
             "SubscriptionsScreen",
-            "Status for ${subscription.fileName ?: subscription.fileId.take(8)}: $status (isDownloading=$isDownloading, isStreaming=$isStreaming)"
+            "Status for ${subscription.fileName ?: subscription.fileId.take(8)}: $status (isDownloading=$isDownloading, isStreaming=$isStreaming, isAdvertising=$isAdvertising)"
         )
         val filePath = if (subscription.localVersion != null) remember(subscription.fileId, subscription.localVersion) {
             app.fileService.getFile(subscription.fileId, subscription.localVersion!!).absolutePath
@@ -338,9 +344,11 @@ fun SubscriptionRow(
                 Text(
                     status,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (status == "Downloading" || status == "Relaying") androidx.compose.ui.graphics.Color(
-                        0xFF4CAF50
-                    ) else MaterialTheme.colorScheme.primary
+                    color = when (status) {
+                        "Downloading", "Relaying", "Advertising" -> androidx.compose.ui.graphics.Color(0xFF4CAF50)
+                        "Searching" -> androidx.compose.ui.graphics.Color(0xFFE53935)
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
                 )
                 if (status == "Downloading" || status == "Relaying") {
                     if (progress > 0f) {
@@ -351,6 +359,8 @@ fun SubscriptionRow(
                     } else {
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
                     }
+                } else if (status == "Advertising") {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
