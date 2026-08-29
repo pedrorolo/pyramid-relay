@@ -149,7 +149,7 @@ class SyncEngine(
             // Periodic scan restart to fix Samsung BLE stack dropping service data
             launch {
                 while (true) {
-                    kotlinx.coroutines.delay(30_000L)
+                    kotlinx.coroutines.delay(300_000L)
                     if (_downloadingFileIds.value.isNotEmpty() || activeUploadPeers.isNotEmpty()) {
                         EventLog.log("ble", "Periodic scan restart skipped (transfer in progress)")
                         continue
