@@ -37,7 +37,7 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 
 ## Transfer Limits
 
-- **Max file size**: 20 MB (enforced at UI level in `BroadcastsViewModel`)
+- **Max file size**: Unlimited (no enforced limit)
 - **Max concurrent transfers**: 1 transfer at a time (upload OR download) — enforced by shared `transferSemaphore`
 - **Max retries**: 3 attempts per file (prevents infinite retry loops)
 - **Rotation interval**: 10 seconds (paused during active transfers)
@@ -71,6 +71,8 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 - **`activeDownloadPeers`** and **`activeUploadPeers`** concurrent sets for cross-component coordination
 - **`onStreamArmed`** callback: BlePeripheralService → SyncEngine calls `stopAdvertisingAndScanning()` immediately when a stream is armed
 - **`onTransferStart`/`onTransferEnd`** callbacks: BlePeripheralService → SyncEngine stops/resumes advertising+scanning
+- **`onTransferEnd` guards**: Only resumes scanning when both `_downloadingFileIds` and `activeUploadPeers` are empty
+- **`resumeAdvertisingAndScanning()` guards**: Early-returns if there are active downloads or uploads, preventing premature scan resume
 - Download paths wait while `activeUploadPeers.contains(deviceAddress)` before acquiring transferSemaphore
 - **`cancelTransfer(fileId)`**: Cancels active download jobs and stops uploads for a file
 - **Periodic scan/GATT restart skipped during transfers**: Checks `_downloadingFileIds.value.isNotEmpty() || activeUploadPeers.isNotEmpty()`
@@ -92,7 +94,8 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 - **Periodic scan restart**: BLE scan restarts every 5 minutes to fix Samsung BLE stack dropping service data
 - **Periodic GATT server restart**: Every 2 minutes to fix META characteristic not found (skipped during transfers)
 - **Atomic download guard**: Uses Mutex + Semaphore to prevent concurrent downloads for same fileId
-- **File size enforcement**: 20MB limit checked in UI before import (not in FileService)
+- **Cancel transfers disconnects GATT**: `cancelTransfer` calls `disconnectDevice()` and `gattServer?.cancelConnection()` to notify receivers
+- **GZIP compression**: Files compressed before transfer, decompressed on receipt, cached at `file.compressed`
 - **Meta read retries**: 5 attempts (Samsung BLE connections frequently fail on first attempt)
 - **Delete cancels transfers**: `deleteBroadcast` and `deleteSubscription` call `cancelTransfer` first
 
