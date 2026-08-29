@@ -267,6 +267,7 @@ fun SubscriptionRow(
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as P2PBroadcasterApp
+    val bluetoothAvailable by app.syncEngine.isBluetoothAvailable.collectAsState()
     var showQr by remember { mutableStateOf(false) }
 
     val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
@@ -308,8 +309,9 @@ fun SubscriptionRow(
         }
         val versionColor =
             if (subscription.localVersion == null) androidx.compose.ui.graphics.Color(0xFFE53935) else MaterialTheme.colorScheme.onSurface
-        val status = when {
-            isDownloading -> "Downloading"
+         val status = when {
+             !bluetoothAvailable -> "Offline"
+             isDownloading -> "Downloading"
             isStreaming -> "Relaying"
             isAdvertising && subscription.localVersion != null -> "Advertising"
             subscription.localVersion == null -> "Searching"
@@ -345,7 +347,8 @@ fun SubscriptionRow(
                 Text(
                     status,
                     style = MaterialTheme.typography.bodySmall,
-                    color = when (status) {
+                     color = when (status) {
+                         "Offline" -> androidx.compose.ui.graphics.Color(0xFFE53935)
                         "Downloading", "Relaying", "Advertising" -> androidx.compose.ui.graphics.Color(0xFF4CAF50)
                         "Searching" -> androidx.compose.ui.graphics.Color(0xFFE53935)
                         else -> MaterialTheme.colorScheme.onSurfaceVariant

@@ -177,6 +177,7 @@ fun BroadcastsScreen(
     val downloadProgress by viewModel.downloadProgress.collectAsState()
     val streamingProgress by viewModel.streamingProgress.collectAsState()
     val currentAdvertisingFileId by viewModel.currentAdvertisingFileId.collectAsState()
+    val bluetoothAvailable by app.syncEngine.isBluetoothAvailable.collectAsState()
     val pickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let { viewModel.importAndBroadcast(it, context) }
     }
@@ -244,8 +245,9 @@ fun BroadcastsScreen(
                         }
                         val isStreaming = activeStreamingFileIds.contains(broadcast.fileId)
                         val isAdvertising = currentAdvertisingFileId == broadcast.fileId && !isStreaming
-                        val statusText = when {
-                            isStreaming -> "Relaying"
+                         val statusText = when {
+                             !bluetoothAvailable -> "Offline"
+                             isStreaming -> "Relaying"
                             isAdvertising -> "Advertising"
                             else -> "Idle"
                         }
@@ -257,7 +259,7 @@ fun BroadcastsScreen(
                                 Text(broadcast.fileName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.clickable { saveAndOpen() })
                                 val compressedText = if (broadcast.compressedSize in 1 until broadcast.fileSize) " (compressed ${formatSize(broadcast.compressedSize)})" else ""
                                 Text("v${broadcast.version} | ${formatSize(broadcast.fileSize)}$compressedText", style = MaterialTheme.typography.bodySmall)
-                                Text(statusText, style = MaterialTheme.typography.bodySmall, color = if (isStreaming || isAdvertising) androidx.compose.ui.graphics.Color(0xFF4CAF50) else androidx.compose.ui.graphics.Color(0xFF9E9E9E))
+                                 Text(statusText, style = MaterialTheme.typography.bodySmall, color = if (!bluetoothAvailable) androidx.compose.ui.graphics.Color(0xFFE53935) else if (isStreaming || isAdvertising) androidx.compose.ui.graphics.Color(0xFF4CAF50) else androidx.compose.ui.graphics.Color(0xFF9E9E9E))
                                 if (isStreaming) {
                                     val relayProgress = streamingProgress[broadcast.fileId] ?: 0f
                                     if (relayProgress >= 0.99f || relayProgress == 0f) {

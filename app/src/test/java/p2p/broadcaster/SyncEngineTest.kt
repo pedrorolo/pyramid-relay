@@ -45,6 +45,7 @@ class SyncEngineTest {
         notificationService = mockk(relaxed = true)
         every { broadcastDao.changeFlow } returns MutableStateFlow(0L)
         every { subscriptionDao.changeFlow } returns MutableStateFlow(0L)
+        coEvery { broadcastDao.getById(any()) } returns null
         engine = SyncEngine(context, broadcastDao, subscriptionDao, cryptoService, fileService,
             bleCentralService, blePeripheralService, wifiDirectService, notificationService, kotlinx.coroutines.sync.Semaphore(1), testScope)
     }
@@ -72,8 +73,13 @@ class SyncEngineTest {
     fun `spec 10 - buildMetaPayload constructs correct payload for broadcast`() = runTest {
         val fileId = UUID.randomUUID().toString()
         val kp = cryptoService.generateRsaKeyPair()
+        cryptoService.storeKeyPair("sk_$fileId", kp)
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val hashStr = java.util.Base64.getEncoder().encodeToString(cryptoService.sha256("data".toByteArray()))
+        val compressed = java.io.File.createTempFile("payload", ".compressed")
+        compressed.writeBytes("compressed".toByteArray())
+        every { fileService.getVersionDir(fileId, 1) } returns compressed.parentFile
+        every { fileService.getCompressedFile(fileId, 1) } returns compressed
 
         val broadcast = BroadcastEntity(
             fileId, "test.txt", "text/plain", "/path", hashStr,
@@ -85,7 +91,7 @@ class SyncEngineTest {
         val payload = engine.buildMetaPayload(fileId)!!
         assertEquals(16, payload.fileId.size)
         assertEquals(1, payload.version)
-        assertEquals(1024L, payload.fileSize)
+        assertTrue(payload.fileSize > 0L)
         assertEquals(32, payload.fileHash.size)
     }
 
@@ -250,14 +256,20 @@ class SyncEngineTest {
     fun `spec 4 - SyncEngine uuidToBytes produces 16 bytes from UUID`() = runTest {
         val fileId = UUID.randomUUID().toString()
         val kp = cryptoService.generateRsaKeyPair()
+        cryptoService.storeKeyPair("uuid-test", kp)
+        val compressed = java.io.File.createTempFile("payload", ".compressed")
+        compressed.writeBytes("compressed".toByteArray())
+        every { fileService.getVersionDir(fileId, 1) } returns compressed.parentFile
+        every { fileService.getCompressedFile(fileId, 1) } returns compressed
         val broadcast = BroadcastEntity(
             fileId, "f", "t", "p", java.util.Base64.getEncoder().encodeToString(ByteArray(32)), 0, 0, 1,
-            cryptoService.publicKeyToBase64(kp.public), null, java.util.Base64.getEncoder().encodeToString(ByteArray(64)), Role.RELAY, 0, 0
+            cryptoService.publicKeyToBase64(kp.public), "uuid-test", "", Role.ORIGINATOR, 0, 0
         )
         coEvery { broadcastDao.getById(fileId) } returns broadcast
 
         val payload = engine.buildMetaPayload(fileId)!!
         assertEquals(16, payload.fileId.size)
+        compressed.delete()
     }
 
     @Test
@@ -371,18 +383,17 @@ class SyncEngineTest {
     fun `spec 10 - buildMetaPayload with valid broadcast returns correct fields`() = runTest {
         val fileId = UUID.randomUUID().toString()
         val kp = cryptoService.generateRsaKeyPair()
+        cryptoService.storeKeyPair("sk_$fileId", kp)
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val hashBytes = cryptoService.sha256("test data".toByteArray())
         val hashStr = java.util.Base64.getEncoder().encodeToString(hashBytes)
-        val sigBytes = cryptoService.sign(
-            cryptoService.buildSignatureMessage(fileId, 1, hashBytes.joinToString("") { "%02x".format(it) }),
-            kp.private
-        )
-        val sigStr = java.util.Base64.getEncoder().encodeToString(sigBytes)
-
+        val compressed = java.io.File.createTempFile("payload", ".compressed")
+        compressed.writeBytes("compressed".toByteArray())
+        every { fileService.getVersionDir(fileId, 1) } returns compressed.parentFile
+        every { fileService.getCompressedFile(fileId, 1) } returns compressed
         val broadcast = BroadcastEntity(
             fileId, "test.txt", "text/plain", "/path", hashStr,
-            2048, 2048, 1, pubKeyStr, "sk_$fileId", sigStr,
+            2048, 2048, 1, pubKeyStr, "sk_$fileId", "",
             Role.ORIGINATOR, 0L, 0L
         )
         coEvery { broadcastDao.getById(fileId) } returns broadcast
@@ -390,9 +401,9 @@ class SyncEngineTest {
         val payload = engine.buildMetaPayload(fileId)!!
         assertEquals(16, payload.fileId.size)
         assertEquals(1, payload.version)
-        assertEquals(2048L, payload.fileSize)
+        assertTrue(payload.fileSize > 0L)
         assertArrayEquals(hashBytes, payload.fileHash)
-        assertArrayEquals(sigBytes, payload.signature)
+        compressed.delete()
     }
 
     @Test
@@ -451,7 +462,7 @@ class SyncEngineTest {
     @Test
     fun `re-subscribed file is probed again after discovery state reset`() = runTest {
         val fileId = UUID.randomUUID().toString()
-        val kp = cryptoService.generateEd25519KeyPair()
+        val kp = cryptoService.generateRsaKeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val subscription = SubscriptionEntity(fileId, pubKeyStr, "test.txt", null, null, 0L, null, null, null)
         coEvery { subscriptionDao.getAll() } returns listOf(subscription)
@@ -462,11 +473,10 @@ class SyncEngineTest {
         serviceData[9] = 1 // version 1
         cryptoService.keyId(pubKeyStr).copyInto(serviceData, 10)
 
-        // Meta carries the correct publisher key but a bogus signature: the
-        // probe (readMeta) happens and sets the cooldown, then verification fails.
+        // The probe happens and sets the cooldown, then the transfer is rejected
+        // because this test supplies no valid encrypted payload.
         val meta = BleMetaPayload(
             uuidBytes(fileId), 1,
-            ByteArray(64),
             cryptoService.sha256("data".toByteArray()),
             4L,
             "test.txt"

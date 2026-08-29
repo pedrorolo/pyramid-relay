@@ -80,16 +80,24 @@ class SyncEngine(
     val streamingProgress: StateFlow<Map<String, Float>> get() = blePeripheralService.streamingProgress
     val currentAdvertisingFileId: StateFlow<String?> get() = blePeripheralService.currentAdvertisingFileId
 
+    private val _isBluetoothAvailable = MutableStateFlow(
+        (context.getSystemService(Context.BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager)
+            ?.adapter?.isEnabled == true
+    )
+    val isBluetoothAvailable: StateFlow<Boolean> = _isBluetoothAvailable.asStateFlow()
+
     private val bluetoothStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
             when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
                 BluetoothAdapter.STATE_OFF -> {
+                    _isBluetoothAvailable.value = false
                     EventLog.log("sync", "Bluetooth OFF - cancelling transfers and stopping BLE")
                     activeDownloadJobs.keys.toList().forEach { cancelTransfer(it) }
                     bleCentralService.stopScan()
                     blePeripheralService.stopAllAdvertising()
                 }
                 BluetoothAdapter.STATE_ON -> {
+                    _isBluetoothAvailable.value = true
                     EventLog.log("sync", "Bluetooth ON - restarting BLE operations")
                     scope.launch {
                         try {
@@ -129,8 +137,9 @@ class SyncEngine(
                         val encrypted = File(fileService.getVersionDir(fileId, version), "file.encrypted")
                         if (!encrypted.exists()) {
                             val compressed = fileService.getCompressedFile(fileId, version).readBytes()
-                            val publicKey = cryptoService.publicKeyFromBase64(broadcast.publicKey)
-                            encrypted.writeBytes(cryptoService.encryptCompressed(compressed, publicKey))
+                            val privateKey = broadcast.privateKeyAlias?.let { cryptoService.getPrivateKey(it) }
+                                ?: throw IllegalStateException("No private key for originator payload")
+                            encrypted.writeBytes(cryptoService.encryptCompressed(compressed, privateKey))
                         }
                         encrypted.readBytes()
                     }
@@ -283,6 +292,13 @@ class SyncEngine(
         val fileIdBytes = uuidToBytes(fileId) ?: return null
         val hashBytes = Base64.getDecoder().decode(broadcast.fileHash)
         val encrypted = File(fileService.getVersionDir(fileId, broadcast.version), "file.encrypted")
+        if (!encrypted.exists()) {
+            val privateKey = broadcast.privateKeyAlias?.let { cryptoService.getPrivateKey(it) }
+                ?: return null
+            val compressed = fileService.getCompressedFile(fileId, broadcast.version).readBytes()
+            encrypted.parentFile?.mkdirs()
+            encrypted.writeBytes(cryptoService.encryptCompressed(compressed, privateKey))
+        }
         return BleMetaPayload(fileIdBytes, broadcast.version, hashBytes, encrypted.length(), broadcast.fileName)
     }
 
@@ -440,7 +456,9 @@ class SyncEngine(
                 tmpFile.delete(); return false
             }
             val encrypted = tmpFile.readBytes()
-            val compressed = try { cryptoService.decryptCompressed(encrypted, cryptoService.getRecipientPrivateKey(broadcast.publicKey) ?: return false) } catch (e: Exception) { tmpFile.delete(); EventLog.log("sync", "Decrypt failed: ${e.message}"); return false }
+            val compressed = try {
+                cryptoService.decryptCompressed(encrypted, cryptoService.publicKeyFromBase64(broadcast.publicKey))
+            } catch (e: Exception) { tmpFile.delete(); EventLog.log("sync", "Decrypt failed: ${e.message}"); return false }
             tmpFile.writeBytes(compressed)
             val internalFile = fileService.getFile(broadcast.fileId, newVersion)
             try {
@@ -545,7 +563,9 @@ class SyncEngine(
                 EventLog.log("sync", "Transfer failed for ${subscription.fileId} (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)")
                 return@withTimeout
             }
-            val compressed = try { cryptoService.decryptCompressed(tmpFile.readBytes(), cryptoService.getRecipientPrivateKey(subscription.publicKey) ?: throw IllegalStateException("No recipient private key")) } catch (e: Exception) { tmpFile.delete(); EventLog.log("sync", "Decrypt failed: ${e.message}"); return@withTimeout }
+            val compressed = try {
+                cryptoService.decryptCompressed(tmpFile.readBytes(), cryptoService.publicKeyFromBase64(subscription.publicKey))
+            } catch (e: Exception) { tmpFile.delete(); EventLog.log("sync", "Decrypt failed: ${e.message}"); return@withTimeout }
             tmpFile.writeBytes(compressed)
             val internalFile = fileService.getFile(subscription.fileId, newVersion)
             try {

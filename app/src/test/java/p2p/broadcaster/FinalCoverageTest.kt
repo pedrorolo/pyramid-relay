@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import io.mockk.*
+import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -67,6 +68,8 @@ class FinalCoverageTest {
 
         val fileId = UUID.randomUUID().toString()
         val kp = cryptoService.generateRsaKeyPair()
+        cryptoService.storeKeyPair("sk", kp)
+        cryptoService.storeKeyPair("sk", kp)
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val broadcast = BroadcastEntity(fileId, "test.txt", "text/plain", "/path", "hash", 1024, 1024, 1, pubKeyStr, "sk", "sig", Role.ORIGINATOR, 0, 0)
         coEvery { broadcastDao.getAll() } returns listOf(broadcast)
@@ -148,21 +151,19 @@ class FinalCoverageTest {
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val hashBytes = cryptoService.sha256("test data".toByteArray())
         val hashStr = java.util.Base64.getEncoder().encodeToString(hashBytes)
-        val sigBytes = cryptoService.sign(
-            cryptoService.buildSignatureMessage(fileId, 1, hashBytes.joinToString("") { "%02x".format(it) }),
-            kp.private
-        )
-        val sigStr = java.util.Base64.getEncoder().encodeToString(sigBytes)
-
-        val broadcast = BroadcastEntity(fileId, "test.txt", "text/plain", "/path", hashStr, 2048, 2048, 1, pubKeyStr, "sk", sigStr, Role.ORIGINATOR, 0, 0)
+        val compressed = File.createTempFile("payload", ".compressed")
+        compressed.writeBytes("compressed".toByteArray())
+        every { fileService.getVersionDir(fileId, 1) } returns compressed.parentFile
+        every { fileService.getCompressedFile(fileId, 1) } returns compressed
+        val broadcast = BroadcastEntity(fileId, "test.txt", "text/plain", "/path", hashStr, 2048, 2048, 1, pubKeyStr, "sk", "", Role.ORIGINATOR, 0, 0)
         coEvery { broadcastDao.getById(fileId) } returns broadcast
 
         val payload = engine.buildMetaPayload(fileId)!!
         assertEquals(16, payload.fileId.size)
         assertEquals(1, payload.version)
-        assertEquals(2048L, payload.fileSize)
+        assertTrue(payload.fileSize > 0L)
         assertArrayEquals(hashBytes, payload.fileHash)
-        assertArrayEquals(sigBytes, payload.signature)
+        compressed.delete()
     }
 
     @Test

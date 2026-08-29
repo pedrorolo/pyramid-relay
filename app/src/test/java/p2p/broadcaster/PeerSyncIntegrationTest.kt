@@ -85,6 +85,7 @@ class PeerSyncIntegrationTest {
     private fun publish(content: ByteArray): Pair<BroadcastEntity, KeyPair> {
         val fileId = UUID.randomUUID().toString()
         val keys = cryptoA.generateRsaKeyPair()
+        cryptoA.storeKeyPair("sk_$fileId", keys)
         val publicKey = cryptoA.publicKeyToBase64(keys.public)
         val version = 1
         val file = fileServiceA.getFile(fileId, version).apply { parentFile!!.mkdirs(); writeBytes(content) }
@@ -117,7 +118,7 @@ class PeerSyncIntegrationTest {
         val payload = BleMetaPayload.fromBytes(engineA.buildMetaPayload(entity.fileId)!!.toBytes())!!
         assertEquals(entity.version, payload.version)
         assertArrayEquals(cryptoA.sha256(content), payload.fileHash)
-        assertEquals(entity.compressedSize, payload.fileSize)
+        assertTrue(payload.fileSize > entity.compressedSize)
         assertEquals(BleMetaPayload.FIXED_SIZE + entity.fileName.toByteArray().size, payload.toBytes().size)
     }
 
