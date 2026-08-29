@@ -139,7 +139,8 @@ class SyncEngine(
             blePeripheralService.onUploadEnd = { address -> activeUploadPeers.remove(address) }
             blePeripheralService.onTransferStart = { stopAdvertisingAndScanning() }
             blePeripheralService.onTransferEnd = {
-                if (_downloadingFileIds.value.isEmpty() && activeUploadPeers.isEmpty()) {
+                // Upload is done — only check if a download is still active
+                if (_downloadingFileIds.value.isEmpty()) {
                     resumeAdvertisingAndScanning()
                 }
             }
