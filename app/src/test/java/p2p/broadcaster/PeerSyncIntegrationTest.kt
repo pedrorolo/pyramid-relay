@@ -167,7 +167,7 @@ class PeerSyncIntegrationTest {
      * (no parsing shortcuts).
      */
     private fun stubGattTransfer() {
-        coEvery { bleCentralB.fetchFile(any(), any<Int>(), any<Long>(), any<OutputStream>()) } answers {
+        coEvery { bleCentralB.fetchFile(any(), any<Int>(), any<Long>(), any<OutputStream>(), any()) } answers {
             val version = arg<Int>(1)
             val out = arg<OutputStream>(3)
             val fileId = advertisementsA.keys.firstOrNull()
@@ -255,13 +255,31 @@ class PeerSyncIntegrationTest {
         val (entity, _) = publishOnDeviceA(content)
         subscribeOnDeviceB(entity)
 
-        // Stub only the radios; connect them to each other with real payloads
-        engineA.startAdvertising(entity)
+        // Stub the GATT transfer: B reads META from A and fetches the file from A's store
         coEvery { bleCentralB.readMeta(any(), any()) } coAnswers { gattReadFromA() }
         stubGattTransfer()
 
+        // Start advertising on A and capture the service data
+        engineA.startAdvertising(entity)
+        assertTrue("advertisementsA should contain the fileId", advertisementsA.containsKey(entity.fileId))
+        val serviceData = advertisementsA[entity.fileId]!!
+        assertTrue("serviceData should be at least 14 bytes", serviceData.size >= 14)
+
+        // Debug: check subscription setup
+        val subscriptions = subscriptionDaoB.getAll()
+        assertEquals(1, subscriptions.size)
+        val sub = subscriptions[0]
+        assertEquals(entity.fileId, sub.fileId)
+        assertEquals(entity.publicKey, sub.publicKey)
+
+        // Debug: check fileIdHash matching
+        val fileIdHash = cryptoB.fileIdHash(entity.fileId)
+        val serviceDataFileIdHash = serviceData.copyOfRange(0, 6)
+        assertTrue("fileIdHash should match", fileIdHash.contentEquals(serviceDataFileIdHash))
+
         // Act: B hears the advertisement and runs its whole receive pipeline
-        assertTrue(engineB.handleDiscoveredDevice("AA:BB:CC:DD:EE:04", advertisementsA[entity.fileId]!!))
+        val result = engineB.handleDiscoveredDevice("AA:BB:CC:DD:EE:04", serviceData)
+        assertTrue("handleDiscoveredDevice should return true for a valid subscription match", result)
 
         // Database side: subscription advanced to v2 with a real location in B's store
         val updatedSlot = slot<Int>()
@@ -276,7 +294,7 @@ class PeerSyncIntegrationTest {
         // Physical side: the delivered file lives in B's store and is byte-identical
         val receivedFile = File(uriSlot.captured)
         assertTrue(receivedFile.exists())
-        assertTrue(receivedFile.path.startsWith(fileDirB.path)) // really stored under B's tree
+        assertTrue(receivedFile.path.startsWith(fileDirB.path))
         assertArrayEquals(cryptoB.sha256(content), cryptoB.sha256(receivedFile.readBytes()))
         assertEquals(content.size.toLong(), receivedFile.length())
 
@@ -308,7 +326,8 @@ class PeerSyncIntegrationTest {
         // replaying the advertised shape for the known fileId.
         val attackerKp = cryptoB.generateEd25519KeyPair()
         val hashHex = cryptoB.sha256Hex(content)
-        val attackerSig = cryptoB.sign(cryptoB.buildSignatureMessage(entity.fileId, entity.version, hashHex), attackerKp.private)
+        val attackerSig =
+            cryptoB.sign(cryptoB.buildSignatureMessage(entity.fileId, entity.version, hashHex), attackerKp.private)
         val forgedPayload = BleMetaPayload(
             uuidToBytesUnchecked(entity.fileId), entity.version,
             attackerSig,
@@ -332,7 +351,14 @@ class PeerSyncIntegrationTest {
 
         // Correct publisher key, corrupted signature over the claimed version/hash
         val good = gattReadFromA()!!
-        val bad = BleMetaPayload(good.fileId, good.version, good.signature.copyOf().also { it[10]++ }, good.fileHash, good.fileSize, good.fileName)
+        val bad = BleMetaPayload(
+            good.fileId,
+            good.version,
+            good.signature.copyOf().also { it[10]++ },
+            good.fileHash,
+            good.fileSize,
+            good.fileName
+        )
         coEvery { bleCentralB.readMeta(any(), any()) } returns bad
 
         assertFalse(engineB.handleDiscoveredDevice("AA:BB:CC:DD:EE:06", advertisementsA[entity.fileId]!!))
@@ -395,7 +421,8 @@ class PeerSyncIntegrationTest {
                 if (result.isSuccess) received = result.getOrThrow()
                 else {
                     val t = result.exceptionOrNull()!!
-                    errors["${t.javaClass.simpleName}: ${t.message}"] = (errors["${t.javaClass.simpleName}: ${t.message}"] ?: 0) + 1
+                    errors["${t.javaClass.simpleName}: ${t.message}"] =
+                        (errors["${t.javaClass.simpleName}: ${t.message}"] ?: 0) + 1
                     Thread.sleep(100)
                 }
             }
@@ -409,9 +436,13 @@ class PeerSyncIntegrationTest {
 
     private fun uuidToBytesUnchecked(fileId: String): ByteArray {
         val uuid = UUID.fromString(fileId)
-        val msb = uuid.mostSignificantBits; val lsb = uuid.leastSignificantBits
+        val msb = uuid.mostSignificantBits;
+        val lsb = uuid.leastSignificantBits
         return ByteArray(16).also { b ->
-            for (i in 0..7) { b[i] = ((msb ushr (8 * (7 - i))) and 0xFF).toByte(); b[8 + i] = ((lsb ushr (8 * (7 - i))) and 0xFF).toByte() }
+            for (i in 0..7) {
+                b[i] = ((msb ushr (8 * (7 - i))) and 0xFF).toByte(); b[8 + i] =
+                    ((lsb ushr (8 * (7 - i))) and 0xFF).toByte()
+            }
         }
     }
 }
