@@ -79,10 +79,10 @@ class ModelsTest {
 
     @Test
     fun `spec 8 - BleMetaPayload fileSize BE32 encoding for max size`() {
-        val maxFile = BleMetaPayload(ByteArray(16), 1, ByteArray(64), ByteArray(32), MAX_FILE_SIZE, "f")
+        val maxFile = BleMetaPayload(ByteArray(16), 1, ByteArray(64), ByteArray(32), 20L * 1024 * 1024, "f")
         val bytes = maxFile.toBytes()
         val restored = BleMetaPayload.fromBytes(bytes)!!
-        assertEquals(MAX_FILE_SIZE, restored.fileSize)
+        assertEquals(20L * 1024 * 1024, restored.fileSize)
     }
 
     @Test
@@ -137,6 +137,7 @@ class ModelsTest {
             internalUri = "/data/files/store/test-id/v1/file",
             fileHash = "abcdef0123456789",
             fileSize = 1024,
+            compressedSize = 1024,
             version = 1,
             publicKey = "base64-public-key",
             privateKeyAlias = "sk_test-id",
@@ -156,7 +157,7 @@ class ModelsTest {
     fun `spec 4 - BroadcastEntity relay has null privateKeyAlias`() {
         val b = BroadcastEntity(
             fileId = "relay-id", fileName = "f.txt", mimeType = "text/plain",
-            internalUri = "/path", fileHash = "abc", fileSize = 100,
+            internalUri = "/path", fileHash = "abc", fileSize = 100, compressedSize = 100,
             version = 1, publicKey = "pk", privateKeyAlias = null,
             signature = "sig", role = Role.RELAY, createdAt = 0L, updatedAt = 0L
         )

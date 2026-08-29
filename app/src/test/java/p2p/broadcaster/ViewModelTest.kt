@@ -42,11 +42,11 @@ class ViewModelTest {
     @Test
     fun `spec 11 - BroadcastsViewModel only shows ORIGINATOR broadcasts`() = runTest {
         val originator = BroadcastEntity(
-            "id1", "a.txt", "text/plain", "/p", "h", 100, 1,
+            "id1", "a.txt", "text/plain", "/p", "h", 100, 100, 1,
             "pk", null, "sig", Role.ORIGINATOR, 0, 0
         )
         val relay = BroadcastEntity(
-            "id2", "b.txt", "text/plain", "/p", "h", 100, 1,
+            "id2", "b.txt", "text/plain", "/p", "h", 100, 100, 1,
             "pk", null, "sig", Role.RELAY, 0, 0
         )
         coEvery { broadcastDao.getAll() } returns listOf(originator, relay)
@@ -68,7 +68,7 @@ class ViewModelTest {
         advanceUntilIdle()
 
         val broadcast = BroadcastEntity(
-            "del1", "del.txt", "text/plain", "/p", "h", 100, 1,
+            "del1", "del.txt", "text/plain", "/p", "h", 100, 100, 1,
             "pk", null, "sig", Role.ORIGINATOR, 0, 0
         )
         vm.deleteBroadcast(broadcast)

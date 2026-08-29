@@ -77,7 +77,7 @@ class SyncEngineTest {
 
         val broadcast = BroadcastEntity(
             fileId, "test.txt", "text/plain", "/path", hashStr,
-            1024, 1, pubKeyStr, "sk_$fileId", java.util.Base64.getEncoder().encodeToString(ByteArray(64)),
+            1024, 1024, 1, pubKeyStr, "sk_$fileId", java.util.Base64.getEncoder().encodeToString(ByteArray(64)),
             Role.ORIGINATOR, 0L, 0L
         )
         coEvery { broadcastDao.getById(fileId) } returns broadcast
@@ -92,13 +92,13 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `spec 8 - startAdvertising constructs 14 byte service data`() {
+    fun `spec 8 - startAdvertising constructs 14 byte service data`() = runTest {
         val fileId = UUID.randomUUID().toString()
         val kp = cryptoService.generateEd25519KeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val broadcast = BroadcastEntity(
             fileId, "test.txt", "text/plain", "/path", "abc",
-            1024, 5, pubKeyStr, null, "sig",
+            1024, 1024, 5, pubKeyStr, null, "sig",
             Role.RELAY, 0L, 0L
         )
 
@@ -117,12 +117,12 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `spec 8 - startAdvertising version BE32 encoded at correct offset`() {
+    fun `spec 8 - startAdvertising version BE32 encoded at correct offset`() = runTest {
         val fileId = UUID.randomUUID().toString()
         val kp = cryptoService.generateEd25519KeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val broadcast = BroadcastEntity(
-            fileId, "f", "t", "p", "h", 0, 0x01020304, pubKeyStr, null, "s",
+            fileId, "f", "t", "p", "h", 0, 0, 0x01020304, pubKeyStr, null, "s",
             Role.RELAY, 0, 0
         )
 
@@ -177,7 +177,7 @@ class SyncEngineTest {
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val broadcast = BroadcastEntity(
             fileId, "test.txt", "text/plain", "/path", "abc",
-            1024, 3, pubKeyStr, null, "sig",
+            1024, 1024, 3, pubKeyStr, null, "sig",
             Role.RELAY, 0L, 0L
         )
         coEvery { broadcastDao.getAll() } returns listOf(broadcast)
@@ -253,7 +253,7 @@ class SyncEngineTest {
         val fileId = UUID.randomUUID().toString()
         val kp = cryptoService.generateEd25519KeyPair()
         val broadcast = BroadcastEntity(
-            fileId, "f", "t", "p", java.util.Base64.getEncoder().encodeToString(ByteArray(32)), 0, 1,
+            fileId, "f", "t", "p", java.util.Base64.getEncoder().encodeToString(ByteArray(32)), 0, 0, 1,
             cryptoService.publicKeyToBase64(kp.public), null, java.util.Base64.getEncoder().encodeToString(ByteArray(64)), Role.RELAY, 0, 0
         )
         coEvery { broadcastDao.getById(fileId) } returns broadcast
@@ -308,13 +308,13 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `spec 10 - startAdvertising calls blePeripheral with correct service data`() {
+    fun `spec 10 - startAdvertising calls blePeripheral with correct service data`() = runTest {
         val fileId = UUID.randomUUID().toString()
         val kp = cryptoService.generateEd25519KeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val broadcast = BroadcastEntity(
             fileId, "test.txt", "text/plain", "/path", "abc",
-            1024, 0, pubKeyStr, null, "sig",
+            1024, 1024, 0, pubKeyStr, null, "sig",
             Role.ORIGINATOR, 0L, 0L
         )
 
@@ -338,7 +338,7 @@ class SyncEngineTest {
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val broadcast = BroadcastEntity(
             fileId, "test.txt", "text/plain", "/path", "abc",
-            1024, 10, pubKeyStr, "sk_$fileId", "sig",
+            1024, 1024, 10, pubKeyStr, "sk_$fileId", "sig",
             Role.ORIGINATOR, 0L, 0L
         )
         coEvery { broadcastDao.getAll() } returns listOf(broadcast)
@@ -384,7 +384,7 @@ class SyncEngineTest {
 
         val broadcast = BroadcastEntity(
             fileId, "test.txt", "text/plain", "/path", hashStr,
-            2048, 1, pubKeyStr, "sk_$fileId", sigStr,
+            2048, 2048, 1, pubKeyStr, "sk_$fileId", sigStr,
             Role.ORIGINATOR, 0L, 0L
         )
         coEvery { broadcastDao.getById(fileId) } returns broadcast
@@ -398,12 +398,12 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `spec 8 - startAdvertising includes keyId at offset 10-13`() {
+    fun `spec 8 - startAdvertising includes keyId at offset 10-13`() = runTest {
         val fileId = UUID.randomUUID().toString()
         val kp = cryptoService.generateEd25519KeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val broadcast = BroadcastEntity(
-            fileId, "test", "t", "/p", "h", 0, 7, pubKeyStr, null, "s",
+            fileId, "test", "t", "/p", "h", 0, 0, 7, pubKeyStr, null, "s",
             Role.RELAY, 0, 0
         )
 
@@ -417,12 +417,12 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `spec 8 - startAdvertising includes fileIdHash at offset 0-5`() {
+    fun `spec 8 - startAdvertising includes fileIdHash at offset 0-5`() = runTest {
         val fileId = UUID.randomUUID().toString()
         val kp = cryptoService.generateEd25519KeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
         val broadcast = BroadcastEntity(
-            fileId, "test", "t", "/p", "h", 0, 3, pubKeyStr, null, "s",
+            fileId, "test", "t", "/p", "h", 0, 0, 3, pubKeyStr, null, "s",
             Role.RELAY, 0, 0
         )
 

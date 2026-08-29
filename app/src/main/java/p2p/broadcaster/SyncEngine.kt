@@ -115,10 +115,15 @@ class SyncEngine(
             Log.d(TAG, "SyncEngine started")
             EventLog.log("sync", "Engine started - scanning, advertising and transfer server active")
             blePeripheralService.setMetaPayloadProvider { fileId -> buildMetaPayload(fileId) }
-            // GATT streaming: serves bytes of the file we advertise.
+            // GATT streaming: serves compressed bytes of the file we advertise.
             blePeripheralService.setServeFileLoader { fileId, version ->
-                val file = fileService.getFile(fileId, version)
-                if (file.exists()) file.readBytes() else null
+                try {
+                    val compressed = fileService.getCompressedFile(fileId, version)
+                    compressed.readBytes()
+                } catch (e: Exception) {
+                    EventLog.log("ble", "Failed to get compressed file for streaming: ${e.message}")
+                    null
+                }
             }
             bleCentralService.onDeviceDiscovered = { address, serviceData ->
                 scope.launch { handleDiscoveredDevice(address, serviceData) }
@@ -259,10 +264,10 @@ class SyncEngine(
         val fileIdBytes = uuidToBytes(fileId) ?: return null
         val sigBytes = Base64.getDecoder().decode(broadcast.signature)
         val hashBytes = Base64.getDecoder().decode(broadcast.fileHash)
-        return BleMetaPayload(fileIdBytes, broadcast.version, sigBytes, hashBytes, broadcast.fileSize, broadcast.fileName)
+        return BleMetaPayload(fileIdBytes, broadcast.version, sigBytes, hashBytes, broadcast.compressedSize, broadcast.fileName)
     }
 
-    fun startAdvertising(broadcast: BroadcastEntity) {
+    suspend fun startAdvertising(broadcast: BroadcastEntity) {
         val serviceData = ByteArray(14)
         cryptoService.fileIdHash(broadcast.fileId).copyInto(serviceData, 0)
         serviceData[6] = ((broadcast.version ushr 24) and 0xFF).toByte()
@@ -270,10 +275,20 @@ class SyncEngine(
         serviceData[8] = ((broadcast.version ushr 8) and 0xFF).toByte()
         serviceData[9] = (broadcast.version and 0xFF).toByte()
         cryptoService.keyId(broadcast.publicKey).copyInto(serviceData, 10)
+        // Ensure compressed file is cached before advertising
+        if (broadcast.compressedSize == 0L || broadcast.compressedSize == broadcast.fileSize) {
+            try {
+                val compressedSize = fileService.getCompressedSize(broadcast.fileId, broadcast.version)
+                broadcastDao.updateVersion(broadcast.fileId, broadcast.version, broadcast.fileHash, broadcast.signature, broadcast.internalUri, broadcast.fileSize, compressedSize, System.currentTimeMillis())
+                EventLog.log("adv", "Compressed ${broadcast.fileId.takeLast(8)}: ${broadcast.fileSize}B -> ${compressedSize}B")
+            } catch (e: Exception) {
+                EventLog.log("adv", "Compression failed for ${broadcast.fileId.takeLast(8)}: ${e.message}")
+            }
+        }
         blePeripheralService.startAdvertising(broadcast.fileId, serviceData)
         advertisedFiles.add(broadcast.fileId)
         wifiDirectService.setDeviceTag(cryptoService.keyId(broadcast.publicKey))
-        EventLog.log("adv", "Advertising \"${broadcast.fileName}\" v${broadcast.version} (${broadcast.fileSize}B)")
+        EventLog.log("adv", "Advertising \"${broadcast.fileName}\" v${broadcast.version} (${broadcast.fileSize}B, compressed ${broadcast.compressedSize}B)")
     }
 
     /**
@@ -395,7 +410,7 @@ class SyncEngine(
             EventLog.log("gatt", "Meta verified for ${broadcast.fileName} v$newVersion")
             val tmpFile = fileService.getTmpFile(broadcast.fileId, newVersion)
             tmpFile.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IllegalStateException("Cannot create temporary download directory") }
-            EventLog.log("ble", "Streaming ${broadcast.fileId} v$newVersion (${metaPayload.fileSize}B) over GATT")
+            EventLog.log("ble", "Streaming ${broadcast.fileId} v$newVersion (${metaPayload.fileSize}B compressed) over GATT")
             val transferred = try {
                 tmpFile.outputStream().use { output ->
                     bleCentralService.fetchFile(deviceAddress, newVersion, metaPayload.fileSize, output) { got, total ->
@@ -411,12 +426,20 @@ class SyncEngine(
                 EventLog.log("sync", "Downloaded file size mismatch for ${broadcast.fileId}: ${tmpFile.length()}/${metaPayload.fileSize}B")
                 tmpFile.delete(); return false
             }
-            val receivedHash = cryptoService.sha256Hex(tmpFile.readBytes())
+            // Decompress the received file
+            val internalFile = fileService.getFile(broadcast.fileId, newVersion)
+            try {
+                fileService.decompressFile(tmpFile, internalFile)
+                tmpFile.delete()
+            } catch (e: Exception) {
+                EventLog.log("sync", "Decompression failed for ${broadcast.fileId}: ${e.message}")
+                tmpFile.delete(); internalFile.delete(); return false
+            }
+            val receivedHash = cryptoService.sha256Hex(internalFile.readBytes())
             if (receivedHash != hashHex) {
-                tmpFile.delete(); EventLog.log("sync", "Hash mismatch after transfer of ${broadcast.fileId} - discarded")
+                internalFile.delete(); EventLog.log("sync", "Hash mismatch after transfer of ${broadcast.fileId} - discarded")
                 return false
             }
-            val internalFile = fileService.commitDownloadedFile(broadcast.fileId, newVersion, tmpFile)
             val existingSignature = Base64.getEncoder().encodeToString(metaPayload.signature)
             val privateKeyAlias = broadcast.privateKeyAlias
             val sigToStore = if (privateKeyAlias != null) {
@@ -429,7 +452,7 @@ class SyncEngine(
             } else {
                 existingSignature
             }
-            broadcastDao.updateVersion(broadcast.fileId, newVersion, Base64.getEncoder().encodeToString(metaPayload.fileHash), sigToStore, internalFile.absolutePath, metaPayload.fileSize, System.currentTimeMillis(), metaPayload.fileName.takeIf { it.isNotBlank() } ?: broadcast.fileName)
+            broadcastDao.updateVersion(broadcast.fileId, newVersion, Base64.getEncoder().encodeToString(metaPayload.fileHash), sigToStore, internalFile.absolutePath, internalFile.length(), metaPayload.fileSize, System.currentTimeMillis(), metaPayload.fileName.takeIf { it.isNotBlank() } ?: broadcast.fileName)
             subscriptionDao.updateReceived(broadcast.fileId, newVersion, internalFile.absolutePath, newVersion, System.currentTimeMillis(), metaPayload.fileName.takeIf { it.isNotBlank() } ?: broadcast.fileName)
             EventLog.log("sync", "Subscription record updated to v$newVersion for ${broadcast.fileId}")
             fileService.evictOldVersions(broadcast.fileId, newVersion)
@@ -498,7 +521,7 @@ class SyncEngine(
             EventLog.log("gatt", "Meta verified for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
             val tmpFile = fileService.getTmpFile(subscription.fileId, newVersion)
             tmpFile.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IllegalStateException("Cannot create temporary download directory") }
-            EventLog.log("ble", "Streaming ${subscription.fileId} v$newVersion (${metaPayload.fileSize}B) over GATT, tmpFile=${tmpFile.absolutePath}")
+            EventLog.log("ble", "Streaming ${subscription.fileId} v$newVersion (${metaPayload.fileSize}B compressed) over GATT, tmpFile=${tmpFile.absolutePath}")
             val transferred = try {
                 tmpFile.outputStream().use { output ->
                     EventLog.log("ble", "Output stream opened: ${output.javaClass.name}")
@@ -511,7 +534,7 @@ class SyncEngine(
                 EventLog.log("ble", "fetchFile error: ${e.message}"); false
             }
             EventLog.log("ble", "After fetchFile: transferred=$transferred, tmpFile.exists()=${tmpFile.exists()}, tmpFile.length()=${tmpFile.length()}")
-            if (!transferred) { 
+            if (!transferred) {
                 tmpFile.delete()
                 downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
                 EventLog.log("sync", "Transfer failed for ${subscription.fileId} (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)"); return@withTimeout
@@ -523,16 +546,27 @@ class SyncEngine(
                 EventLog.log("sync", "Transfer failed for ${subscription.fileId} (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)")
                 return@withTimeout
             }
-            val receivedHash = cryptoService.sha256Hex(tmpFile.readBytes())
-            if (receivedHash != hashHex) {
+            // Decompress the received file
+            val internalFile = fileService.getFile(subscription.fileId, newVersion)
+            try {
+                fileService.decompressFile(tmpFile, internalFile)
                 tmpFile.delete()
+            } catch (e: Exception) {
+                EventLog.log("sync", "Decompression failed for ${subscription.fileId}: ${e.message}")
+                tmpFile.delete(); internalFile.delete()
+                downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
+                EventLog.log("sync", "Transfer failed for ${subscription.fileId} (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)")
+                return@withTimeout
+            }
+            val receivedHash = cryptoService.sha256Hex(internalFile.readBytes())
+            if (receivedHash != hashHex) {
+                internalFile.delete()
                 downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
                 EventLog.log("sync", "Hash mismatch after transfer of ${subscription.fileId} - discarded (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)")
                 return@withTimeout
             }
             // Success - clear retry count
             downloadRetryCount.remove(subscription.fileId)
-            val internalFile = fileService.commitDownloadedFile(subscription.fileId, newVersion, tmpFile)
             EventLog.log("sync", "Committed ${internalFile.absolutePath} (${internalFile.length()}B) for subscription v$newVersion")
             val resolvedFileName = metaPayload.fileName.takeIf { it.isNotBlank() } ?: subscription.fileName
             if (metaPayload.fileName.isNotBlank() && metaPayload.fileName != subscription.fileName) {
@@ -546,9 +580,6 @@ class SyncEngine(
                 EventLog.log("sync", "WARNING: subscription row not at v$newVersion after update (found v${persisted?.localVersion})")
             }
             fileService.evictOldVersions(subscription.fileId, newVersion)
-            if (!internalFile.isFile || internalFile.length() != metaPayload.fileSize) {
-                throw IllegalStateException("Committed file changed after eviction: ${internalFile.length()}/${metaPayload.fileSize}B")
-            }
             EventLog.log("sync", "Old versions evicted; current file remains ${internalFile.length()}B")
             val displayName = resolvedFileName ?: subscription.fileId
             if (subscription.localVersion == null) {
@@ -567,7 +598,7 @@ class SyncEngine(
             relayPayload[6] = ((newVersion ushr 24) and 0xFF).toByte(); relayPayload[7] = ((newVersion ushr 16) and 0xFF).toByte()
             relayPayload[8] = ((newVersion ushr 8) and 0xFF).toByte(); relayPayload[9] = (newVersion and 0xFF).toByte()
             cryptoService.keyId(subscription.publicKey).copyInto(relayPayload, 10)
-            broadcastDao.upsert(BroadcastEntity(subscription.fileId, resolvedFileName ?: "File", "application/octet-stream", internalFile.absolutePath, Base64.getEncoder().encodeToString(metaPayload.fileHash), metaPayload.fileSize, newVersion, subscription.publicKey, null, Base64.getEncoder().encodeToString(metaPayload.signature), Role.RELAY, subscription.subscribedAt, System.currentTimeMillis()))
+            broadcastDao.upsert(BroadcastEntity(subscription.fileId, resolvedFileName ?: "File", "application/octet-stream", internalFile.absolutePath, Base64.getEncoder().encodeToString(metaPayload.fileHash), internalFile.length(), metaPayload.fileSize, newVersion, subscription.publicKey, null, Base64.getEncoder().encodeToString(metaPayload.signature), Role.RELAY, subscription.subscribedAt, System.currentTimeMillis()))
             blePeripheralService.startAdvertising(subscription.fileId, relayPayload)
             EventLog.log("adv", "Relaying \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
             onFileReceived?.invoke(subscription.fileId, newVersion)

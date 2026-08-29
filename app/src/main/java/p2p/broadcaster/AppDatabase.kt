@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
-class AppDatabase(context: android.content.Context) : SQLiteOpenHelper(context, "p2p_broadcaster.db", null, 1) {
+class AppDatabase(context: android.content.Context) : SQLiteOpenHelper(context, "p2p_broadcaster.db", null, 2) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""
@@ -25,6 +25,7 @@ class AppDatabase(context: android.content.Context) : SQLiteOpenHelper(context, 
                 internalUri TEXT NOT NULL,
                 fileHash TEXT NOT NULL,
                 fileSize INTEGER NOT NULL,
+                compressedSize INTEGER NOT NULL,
                 version INTEGER NOT NULL,
                 publicKey TEXT NOT NULL,
                 privateKeyAlias TEXT,
@@ -50,9 +51,19 @@ class AppDatabase(context: android.content.Context) : SQLiteOpenHelper(context, 
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS broadcasts")
-        db.execSQL("DROP TABLE IF EXISTS subscriptions")
-        onCreate(db)
+        if (oldVersion < 2) {
+            val cursor = db.rawQuery("PRAGMA table_info(broadcasts)", null)
+            val hasCompressedSize = cursor.use {
+                val nameIndex = it.getColumnIndex("name")
+                while (it.moveToNext()) {
+                    if (nameIndex >= 0 && it.getString(nameIndex) == "compressedSize") return@use true
+                }
+                false
+            }
+            if (!hasCompressedSize) {
+                db.execSQL("ALTER TABLE broadcasts ADD COLUMN compressedSize INTEGER NOT NULL DEFAULT 0")
+            }
+        }
     }
 }
 
@@ -86,6 +97,7 @@ class BroadcastDao(private val db: AppDatabase) {
             put("internalUri", broadcast.internalUri)
             put("fileHash", broadcast.fileHash)
             put("fileSize", broadcast.fileSize)
+            put("compressedSize", broadcast.compressedSize)
             put("version", broadcast.version)
             put("publicKey", broadcast.publicKey)
             put("privateKeyAlias", broadcast.privateKeyAlias)
@@ -103,31 +115,36 @@ class BroadcastDao(private val db: AppDatabase) {
         notifyChange()
     }
 
-    suspend fun updateVersion(fileId: String, version: Int, fileHash: String, sig: String, uri: String, size: Long, now: Long, fileName: String? = null) = withContext(Dispatchers.IO) {
+    suspend fun updateVersion(fileId: String, version: Int, fileHash: String, sig: String, uri: String, size: Long, compressedSize: Long, now: Long, fileName: String? = null) = withContext(Dispatchers.IO) {
         val cv = ContentValues().apply {
             put("version", version); put("fileHash", fileHash); put("signature", sig)
-            put("internalUri", uri); put("fileSize", size); put("updatedAt", now)
+            put("internalUri", uri); put("fileSize", size); put("compressedSize", compressedSize); put("updatedAt", now)
             if (fileName != null) put("fileName", fileName)
         }
         db.writableDatabase.update("broadcasts", cv, "fileId=?", arrayOf(fileId))
         notifyChange()
     }
 
-    private fun cursorToEntity(c: Cursor): BroadcastEntity = BroadcastEntity(
-        fileId = c.getString(c.getColumnIndexOrThrow("fileId")),
-        fileName = c.getString(c.getColumnIndexOrThrow("fileName")),
-        mimeType = c.getString(c.getColumnIndexOrThrow("mimeType")),
-        internalUri = c.getString(c.getColumnIndexOrThrow("internalUri")),
-        fileHash = c.getString(c.getColumnIndexOrThrow("fileHash")),
-        fileSize = c.getLong(c.getColumnIndexOrThrow("fileSize")),
-        version = c.getInt(c.getColumnIndexOrThrow("version")),
-        publicKey = c.getString(c.getColumnIndexOrThrow("publicKey")),
-        privateKeyAlias = c.getString(c.getColumnIndexOrThrow("privateKeyAlias")),
-        signature = c.getString(c.getColumnIndexOrThrow("signature")),
-        role = Role.valueOf(c.getString(c.getColumnIndexOrThrow("role"))),
-        createdAt = c.getLong(c.getColumnIndexOrThrow("createdAt")),
-        updatedAt = c.getLong(c.getColumnIndexOrThrow("updatedAt"))
-    )
+    private fun cursorToEntity(c: Cursor): BroadcastEntity {
+        val compressedSizeIdx = c.getColumnIndex("compressedSize")
+        val compressedSize = if (compressedSizeIdx >= 0 && !c.isNull(compressedSizeIdx)) c.getLong(compressedSizeIdx) else c.getLong(c.getColumnIndexOrThrow("fileSize"))
+        return BroadcastEntity(
+            fileId = c.getString(c.getColumnIndexOrThrow("fileId")),
+            fileName = c.getString(c.getColumnIndexOrThrow("fileName")),
+            mimeType = c.getString(c.getColumnIndexOrThrow("mimeType")),
+            internalUri = c.getString(c.getColumnIndexOrThrow("internalUri")),
+            fileHash = c.getString(c.getColumnIndexOrThrow("fileHash")),
+            fileSize = c.getLong(c.getColumnIndexOrThrow("fileSize")),
+            compressedSize = compressedSize,
+            version = c.getInt(c.getColumnIndexOrThrow("version")),
+            publicKey = c.getString(c.getColumnIndexOrThrow("publicKey")),
+            privateKeyAlias = c.getString(c.getColumnIndexOrThrow("privateKeyAlias")),
+            signature = c.getString(c.getColumnIndexOrThrow("signature")),
+            role = Role.valueOf(c.getString(c.getColumnIndexOrThrow("role"))),
+            createdAt = c.getLong(c.getColumnIndexOrThrow("createdAt")),
+            updatedAt = c.getLong(c.getColumnIndexOrThrow("updatedAt"))
+        )
+    }
 }
 
 class SubscriptionDao(private val db: AppDatabase) {

@@ -135,9 +135,12 @@ class PeerSyncIntegrationTest {
         val signature = cryptoA.sign(cryptoA.buildSignatureMessage(fileId, version, hashHex), kp.private)
         val sigStr = Base64.getEncoder().encodeToString(signature)
 
+        // Compress the file and get the actual compressed size
+        val compressedSize = fileServiceA.getCompressedSize(fileId, version)
+
         val entity = BroadcastEntity(
             fileId, "spec.txt", "text/plain", file.absolutePath, hashStr,
-            content.size.toLong(), version, pubKeyStr, "sk_$fileId", sigStr,
+            content.size.toLong(), compressedSize, version, pubKeyStr, "sk_$fileId", sigStr,
             Role.ORIGINATOR, System.currentTimeMillis(), System.currentTimeMillis()
         )
         coEvery { broadcastDaoA.getById(fileId) } returns entity
@@ -178,7 +181,8 @@ class PeerSyncIntegrationTest {
             val fileId = advertisementsA.keys.firstOrNull()
             if (fileId == null) false
             else {
-                fileServiceA.readForTransfer(fileId, version).use { it.copyTo(out) }
+                val compressed = fileServiceA.getCompressedFile(fileId, version)
+                compressed.inputStream().use { it.copyTo(out) }
                 true
             }
         }
@@ -235,7 +239,7 @@ class PeerSyncIntegrationTest {
 
         assertEquals(entity.version, parsed.version)
         assertArrayEquals(cryptoA.sha256(content), parsed.fileHash)
-        assertEquals(content.size.toLong(), parsed.fileSize)
+        assertEquals(entity.compressedSize, parsed.fileSize)
 
         // Public key is not in META payload - use the subscription's public key
         val reconstructedPubKey = cryptoB.publicKeyFromBase64(entity.publicKey)

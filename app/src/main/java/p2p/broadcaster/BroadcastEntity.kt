@@ -9,6 +9,7 @@ data class BroadcastEntity(
     val internalUri: String,
     val fileHash: String,
     val fileSize: Long,
+    val compressedSize: Long,
     val version: Int,
     val publicKey: String,
     val privateKeyAlias: String?,

@@ -47,7 +47,7 @@ class AppDatabaseTest {
     fun `broadcastDao upsert and getAll returns entity`() = runTest {
         val broadcast = BroadcastEntity(
             "file-1", "test.txt", "text/plain", "/path", "hash1",
-            1024L, 1, "pk1", "sk1", "sig1",
+            1024L, 1024L, 1, "pk1", "sk1", "sig1",
             Role.ORIGINATOR, 100L, 200L
         )
         broadcastDao.upsert(broadcast)
@@ -70,8 +70,8 @@ class AppDatabaseTest {
 
     @Test
     fun `broadcastDao upsert replaces existing entity`() = runTest {
-        val v1 = BroadcastEntity("f1", "a.txt", "t", "/p", "h", 100, 1, "pk", null, "s", Role.ORIGINATOR, 0, 0)
-        val v2 = BroadcastEntity("f1", "b.txt", "t2", "/p2", "h2", 200, 2, "pk2", "sk2", "s2", Role.ORIGINATOR, 1, 2)
+        val v1 = BroadcastEntity("f1", "a.txt", "t", "/p", "h", 100, 100, 1, "pk", null, "s", Role.ORIGINATOR, 0, 0)
+        val v2 = BroadcastEntity("f1", "b.txt", "t2", "/p2", "h2", 200, 200, 2, "pk2", "sk2", "s2", Role.ORIGINATOR, 1, 2)
         broadcastDao.upsert(v1)
         broadcastDao.upsert(v2)
         val all = broadcastDao.getAll()
@@ -87,7 +87,7 @@ class AppDatabaseTest {
 
     @Test
     fun `broadcastDao getById returns entity`() = runTest {
-        val broadcast = BroadcastEntity("f1", "a", "t", "/p", "h", 100, 1, "pk", null, "s", Role.ORIGINATOR, 0, 0)
+        val broadcast = BroadcastEntity("f1", "a", "t", "/p", "h", 100, 100, 1, "pk", null, "s", Role.ORIGINATOR, 0, 0)
         broadcastDao.upsert(broadcast)
         val result = broadcastDao.getById("f1")
         assertNotNull(result)
@@ -96,7 +96,7 @@ class AppDatabaseTest {
 
     @Test
     fun `broadcastDao delete removes entity`() = runTest {
-        val broadcast = BroadcastEntity("f1", "a", "t", "/p", "h", 100, 1, "pk", null, "s", Role.ORIGINATOR, 0, 0)
+        val broadcast = BroadcastEntity("f1", "a", "t", "/p", "h", 100, 100, 1, "pk", null, "s", Role.ORIGINATOR, 0, 0)
         broadcastDao.upsert(broadcast)
         broadcastDao.delete("f1")
         assertEquals(0, broadcastDao.getAll().size)
@@ -109,9 +109,9 @@ class AppDatabaseTest {
 
     @Test
     fun `broadcastDao updateVersion modifies version and hash`() = runTest {
-        val broadcast = BroadcastEntity("f1", "a", "t", "/p", "old_hash", 100, 1, "pk", null, "s", Role.ORIGINATOR, 0, 0)
+        val broadcast = BroadcastEntity("f1", "a", "t", "/p", "old_hash", 100, 100, 1, "pk", null, "s", Role.ORIGINATOR, 0, 0)
         broadcastDao.upsert(broadcast)
-        broadcastDao.updateVersion("f1", 2, "new_hash", "new_sig", "/new_path", 200L, 999L)
+        broadcastDao.updateVersion("f1", 2, "new_hash", "new_sig", "/new_path", 200L, 200L, 999L)
         val result = broadcastDao.getById("f1")!!
         assertEquals(2, result.version)
         assertEquals("new_hash", result.fileHash)
@@ -128,14 +128,14 @@ class AppDatabaseTest {
 
     @Test
     fun `broadcastDao changeFlow emits on upsert`() = runTest {
-        broadcastDao.upsert(BroadcastEntity("f1", "a", "t", "/p", "h", 100, 1, "pk", null, "s", Role.ORIGINATOR, 0, 0))
+        broadcastDao.upsert(BroadcastEntity("f1", "a", "t", "/p", "h", 100, 100, 1, "pk", null, "s", Role.ORIGINATOR, 0, 0))
         advanceUntilIdle()
         assertTrue(broadcastDao.changeFlow.value > 0)
     }
 
     @Test
     fun `broadcastDao changeFlow emits on delete`() = runTest {
-        broadcastDao.upsert(BroadcastEntity("f1", "a", "t", "/p", "h", 100, 1, "pk", null, "s", Role.ORIGINATOR, 0, 0))
+        broadcastDao.upsert(BroadcastEntity("f1", "a", "t", "/p", "h", 100, 100, 1, "pk", null, "s", Role.ORIGINATOR, 0, 0))
         advanceUntilIdle()
         val before = broadcastDao.changeFlow.value
         broadcastDao.delete("f1")
@@ -260,21 +260,23 @@ class AppDatabaseTest {
     }
 
     @Test
-    fun `appDatabase onUpgrade drops and recreates tables`() = runTest {
-        val broadcast = BroadcastEntity("f1", "a", "t", "/p", "h", 100, 1, "pk", null, "s", Role.ORIGINATOR, 0, 0)
+    fun `appDatabase onUpgrade adds compressedSize column`() = runTest {
+        val broadcast = BroadcastEntity("f1", "a", "t", "/p", "h", 100, 100, 1, "pk", null, "s", Role.ORIGINATOR, 0, 0)
         broadcastDao.upsert(broadcast)
         assertEquals(1, broadcastDao.getAll().size)
 
         db.onUpgrade(db.writableDatabase, 1, 2)
 
-        assertTrue(broadcastDao.getAll().isEmpty())
-        assertTrue(subscriptionDao.getAll().isEmpty())
+        // Data should be preserved after upgrade
+        val all = broadcastDao.getAll()
+        assertEquals(1, all.size)
+        assertEquals(100, all[0].compressedSize)
     }
 
     @Test
     fun `broadcastDao multiple entities roundtrip`() = runTest {
-        val b1 = BroadcastEntity("f1", "a.txt", "t", "/p1", "h1", 100, 1, "pk1", null, "s1", Role.ORIGINATOR, 10, 20)
-        val b2 = BroadcastEntity("f2", "b.txt", "t2", "/p2", "h2", 200, 2, "pk2", "sk2", "s2", Role.RELAY, 30, 40)
+        val b1 = BroadcastEntity("f1", "a.txt", "t", "/p1", "h1", 100, 100, 1, "pk1", null, "s1", Role.ORIGINATOR, 10, 20)
+        val b2 = BroadcastEntity("f2", "b.txt", "t2", "/p2", "h2", 200, 200, 2, "pk2", "sk2", "s2", Role.RELAY, 30, 40)
         broadcastDao.upsert(b1)
         broadcastDao.upsert(b2)
         assertEquals(2, broadcastDao.getAll().size)

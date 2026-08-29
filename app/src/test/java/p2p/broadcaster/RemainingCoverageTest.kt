@@ -125,7 +125,7 @@ class RemainingCoverageTest {
 
         val viewModel = BroadcastsViewModel(broadcastDao, cryptoService, fileService)
 
-        val broadcast = BroadcastEntity("del1", "test.txt", "text/plain", "/path", "hash", 100, 1, "pk", "sk", "sig", Role.ORIGINATOR, 0, 0)
+        val broadcast = BroadcastEntity("del1", "test.txt", "text/plain", "/path", "hash", 100, 100, 1, "pk", "sk", "sig", Role.ORIGINATOR, 0, 0)
         viewModel.deleteBroadcast(broadcast)
         advanceUntilIdle()
 

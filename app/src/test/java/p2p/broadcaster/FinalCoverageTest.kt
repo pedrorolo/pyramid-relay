@@ -68,7 +68,7 @@ class FinalCoverageTest {
         val fileId = UUID.randomUUID().toString()
         val kp = cryptoService.generateEd25519KeyPair()
         val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
-        val broadcast = BroadcastEntity(fileId, "test.txt", "text/plain", "/path", "hash", 1024, 1, pubKeyStr, "sk", "sig", Role.ORIGINATOR, 0, 0)
+        val broadcast = BroadcastEntity(fileId, "test.txt", "text/plain", "/path", "hash", 1024, 1024, 1, pubKeyStr, "sk", "sig", Role.ORIGINATOR, 0, 0)
         coEvery { broadcastDao.getAll() } returns listOf(broadcast)
 
         val fileIdHash = cryptoService.fileIdHash(fileId)
@@ -154,7 +154,7 @@ class FinalCoverageTest {
         )
         val sigStr = java.util.Base64.getEncoder().encodeToString(sigBytes)
 
-        val broadcast = BroadcastEntity(fileId, "test.txt", "text/plain", "/path", hashStr, 2048, 1, pubKeyStr, "sk", sigStr, Role.ORIGINATOR, 0, 0)
+        val broadcast = BroadcastEntity(fileId, "test.txt", "text/plain", "/path", hashStr, 2048, 2048, 1, pubKeyStr, "sk", sigStr, Role.ORIGINATOR, 0, 0)
         coEvery { broadcastDao.getById(fileId) } returns broadcast
 
         val payload = engine.buildMetaPayload(fileId)!!
@@ -234,8 +234,8 @@ class FinalCoverageTest {
         val db = AppDatabase(context)
         val dao = BroadcastDao(db)
 
-        dao.upsert(BroadcastEntity("f1", "a", "t", "/p", "old", 100, 1, "pk", null, "s", Role.ORIGINATOR, 0, 0))
-        dao.updateVersion("f1", 2, "new_hash", "new_sig", "/new", 200L, 999L)
+        dao.upsert(BroadcastEntity("f1", "a", "t", "/p", "old", 100, 100, 1, "pk", null, "s", Role.ORIGINATOR, 0, 0))
+        dao.updateVersion("f1", 2, "new_hash", "new_sig", "/new", 200L, 200L, 999L)
 
         val result = dao.getById("f1")!!
         assertEquals(2, result.version)

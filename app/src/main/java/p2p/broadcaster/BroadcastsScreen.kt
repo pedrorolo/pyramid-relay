@@ -86,16 +86,6 @@ class BroadcastsViewModel(
 
     fun importAndBroadcast(uri: Uri, context: android.content.Context) {
         viewModelScope.launch {
-            val fileSize = context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
-                if (cursor.moveToFirst() && sizeIndex >= 0) cursor.getLong(sizeIndex) else null
-            }
-            if (fileSize != null && fileSize > MAX_FILE_SIZE) {
-                val msg = "File too large: ${fileSize / 1024 / 1024}MB (max ${MAX_FILE_SIZE / 1024 / 1024}MB)"
-                EventLog.log("app", msg)
-                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
-                return@launch
-            }
             val fileId = UUID.randomUUID().toString()
             val keyPair = cryptoService.generateEd25519KeyPair()
             val publicKeyStr = cryptoService.publicKeyToBase64(keyPair.public)
@@ -117,7 +107,7 @@ class BroadcastsViewModel(
             broadcastDao.upsert(
                 BroadcastEntity(
                     fileId, fileName, mimeType, file.absolutePath, hashStr,
-                    fileBytes.size.toLong(), version, publicKeyStr, alias, signatureStr,
+                    fileBytes.size.toLong(), fileBytes.size.toLong(), version, publicKeyStr, alias, signatureStr,
                     Role.ORIGINATOR, System.currentTimeMillis(), System.currentTimeMillis()
                 )
             )
@@ -139,16 +129,6 @@ class BroadcastsViewModel(
             val alias = broadcast.privateKeyAlias
             if (alias == null) {
                 EventLog.log("adv", "updateBroadcast: CANCELLED - no private key alias (relay broadcast)")
-                return@launch
-            }
-            val fileSize = context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
-                if (cursor.moveToFirst() && sizeIndex >= 0) cursor.getLong(sizeIndex) else null
-            }
-            if (fileSize != null && fileSize > MAX_FILE_SIZE) {
-                val msg = "File too large: ${fileSize / 1024 / 1024}MB (max ${MAX_FILE_SIZE / 1024 / 1024}MB)"
-                EventLog.log("adv", "updateBroadcast: CANCELLED - $msg")
-                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
                 return@launch
             }
             EventLog.log("adv", "updateBroadcast: alias=$alias")
@@ -182,7 +162,7 @@ class BroadcastsViewModel(
                 EventLog.log("adv", "updateBroadcast: filename changed \"${broadcast.fileName}\" -> \"$effectiveFileName\"")
             }
             EventLog.log("adv", "updateBroadcast: updating DB version to v$newVersion")
-            broadcastDao.updateVersion(broadcast.fileId, newVersion, hashStr, signatureStr, file.absolutePath, fileBytes.size.toLong(), System.currentTimeMillis(), effectiveFileName)
+            broadcastDao.updateVersion(broadcast.fileId, newVersion, hashStr, signatureStr, file.absolutePath, fileBytes.size.toLong(), fileBytes.size.toLong(), System.currentTimeMillis(), effectiveFileName)
             EventLog.log("adv", "updateBroadcast: DB updated, evicting old versions")
             fileService.evictOldVersions(broadcast.fileId, newVersion)
             EventLog.log("adv", "updateBroadcast: DONE - \"$effectiveFileName\" updated to v$newVersion")
@@ -280,7 +260,8 @@ fun BroadcastsScreen(
                         Row(modifier = Modifier.fillMaxWidth().padding(12.dp).height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(broadcast.fileName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.clickable { saveAndOpen() })
-                                Text("v${broadcast.version} | ${formatSize(broadcast.fileSize)}", style = MaterialTheme.typography.bodySmall)
+                                val compressedText = if (broadcast.compressedSize in 1 until broadcast.fileSize) " (compressed ${formatSize(broadcast.compressedSize)})" else ""
+                                Text("v${broadcast.version} | ${formatSize(broadcast.fileSize)}$compressedText", style = MaterialTheme.typography.bodySmall)
                                 Text(statusText, style = MaterialTheme.typography.bodySmall, color = if (isStreaming) androidx.compose.ui.graphics.Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary)
                                 if (isStreaming) {
                                     val relayProgress = streamingProgress[broadcast.fileId] ?: 0f

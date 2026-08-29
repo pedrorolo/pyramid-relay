@@ -6,6 +6,8 @@ import android.provider.OpenableColumns
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
 
 class FileService(private val context: Context) {
 
@@ -75,6 +77,35 @@ class FileService(private val context: Context) {
         val file = getFile(fileId, version)
         if (!file.exists()) throw IllegalStateException("File not found for transfer")
         return file.inputStream()
+    }
+
+    fun getCompressedFile(fileId: String, version: Int): File {
+        val compressed = File(getVersionDir(fileId, version), "file.compressed")
+        if (compressed.exists()) return compressed
+        val original = getFile(fileId, version)
+        if (!original.exists()) throw IllegalStateException("File not found: $fileId v$version")
+        compressFile(original, compressed)
+        return compressed
+    }
+
+    fun getCompressedSize(fileId: String, version: Int): Long {
+        return getCompressedFile(fileId, version).length()
+    }
+
+    fun compressFile(input: File, output: File) {
+        GZIPOutputStream(output.outputStream().buffered()).use { gzip ->
+            input.inputStream().buffered().use { input ->
+                input.copyTo(gzip, bufferSize = 65536)
+            }
+        }
+    }
+
+    fun decompressFile(input: File, output: File) {
+        GZIPInputStream(input.inputStream().buffered()).use { gzip ->
+            output.outputStream().buffered().use { out ->
+                gzip.copyTo(out, bufferSize = 65536)
+            }
+        }
     }
 
     fun getAvailableSpace(): Long {
