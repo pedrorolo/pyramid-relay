@@ -37,7 +37,7 @@ class P2PBroadcasterApp : Application() {
         blePeripheralService = BlePeripheralService(this, transferSemaphore)
         wifiDirectService = WifiDirectService(this)
         syncEngine = SyncEngine(
-            broadcastDao, subscriptionDao, cryptoService, fileService,
+            this, broadcastDao, subscriptionDao, cryptoService, fileService,
             bleCentralService, blePeripheralService, wifiDirectService, notificationService, transferSemaphore
         )
         syncEngine.start()

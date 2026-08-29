@@ -100,7 +100,7 @@ class BleCentralService(private val context: Context) {
         // Samsung BLE connections frequently fail on the first attempt (status !=
         // GATT_SUCCESS). Retry a few times before giving up.
         var lastStatus = -1
-        repeat(3) { attempt ->
+        repeat(5) { attempt ->
             val attemptNo = attempt + 1
             val deferred = CompletableDeferred<BleMetaPayload?>()
             val gattCallback = object : BluetoothGattCallback() {
@@ -160,7 +160,7 @@ class BleCentralService(private val context: Context) {
             if (result != null) return result
             kotlinx.coroutines.delay(300)
         }
-        EventLog.log("ble", "Meta read FAILED after 3 attempts for ${deviceAddress.takeLast(5)} (last status=$lastStatus)")
+        EventLog.log("ble", "Meta read FAILED after 5 attempts for ${deviceAddress.takeLast(5)} (last status=$lastStatus)")
         return null
     }
 

@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.bluetooth.BluetoothAdapter
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
@@ -29,6 +30,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 class SyncEngine(
+    private val context: Context,
     private val broadcastDao: BroadcastDao,
     private val subscriptionDao: SubscriptionDao,
     private val cryptoService: CryptoService,
@@ -75,8 +77,40 @@ class SyncEngine(
     val activeStreamingFileIds: StateFlow<Set<String>> get() = blePeripheralService.activeStreamingFileIds
     val streamingProgress: StateFlow<Map<String, Float>> get() = blePeripheralService.streamingProgress
 
+    private val bluetoothStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: Intent) {
+            when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                BluetoothAdapter.STATE_OFF -> {
+                    EventLog.log("sync", "Bluetooth OFF - cancelling transfers and stopping BLE")
+                    activeDownloadJobs.keys.toList().forEach { cancelTransfer(it) }
+                    bleCentralService.stopScan()
+                    blePeripheralService.stopAllAdvertising()
+                }
+                BluetoothAdapter.STATE_ON -> {
+                    EventLog.log("sync", "Bluetooth ON - restarting BLE operations")
+                    scope.launch {
+                        try {
+                            blePeripheralService.startGattServer()
+                            bleCentralService.startScan()
+                            broadcastDao.getAll().forEach { b ->
+                                try { startAdvertising(b) } catch (e: Exception) {
+                                    EventLog.log("ble", "restart advertising failed for ${b.fileId.takeLast(8)}: ${e.message}")
+                                }
+                            }
+                            EventLog.log("sync", "BLE operations restarted after Bluetooth ON")
+                        } catch (e: Exception) {
+                            EventLog.log("sync", "Failed to restart BLE after Bluetooth ON: ${e.message}")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fun start() {
         if (engineJob?.isActive == true) return
+        val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+        androidx.core.content.ContextCompat.registerReceiver(context, bluetoothStateReceiver, filter, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
         engineJob = scope.launch {
             Log.d(TAG, "SyncEngine started")
             EventLog.log("sync", "Engine started - scanning, advertising and transfer server active")
@@ -99,6 +133,7 @@ class SyncEngine(
             blePeripheralService.onUploadEnd = { address -> activeUploadPeers.remove(address) }
             blePeripheralService.onTransferStart = { stopAdvertisingAndScanning() }
             blePeripheralService.onTransferEnd = { resumeAdvertisingAndScanning() }
+            blePeripheralService.onStreamArmed = { stopAdvertisingAndScanning() }
             // Retry GATT server if initial attempt fails (permissions may not be ready yet after fresh install)
             for (attempt in 1..5) {
                 try { blePeripheralService.startGattServer(); break } catch (e: Exception) {
@@ -189,6 +224,7 @@ class SyncEngine(
 
     fun stop() {
         engineJob?.cancel(); engineJob = null
+        try { context.unregisterReceiver(bluetoothStateReceiver) } catch (_: Exception) {}
         bleCentralService.stopScan()
         blePeripheralService.stopAllAdvertising()
     }

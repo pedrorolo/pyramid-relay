@@ -54,11 +54,13 @@ class FinalCoverageTest {
         val blePeripheralService = mockk<BlePeripheralService>(relaxed = true)
         val wifiDirectService = mockk<WifiDirectService>(relaxed = true)
         val notificationService = mockk<NotificationService>(relaxed = true)
+        val context = mockk<Context>(relaxed = true)
         every { broadcastDao.changeFlow } returns MutableStateFlow(0L)
         every { subscriptionDao.changeFlow } returns MutableStateFlow(0L)
         coEvery { bleCentralService.readMeta(any(), any()) } returns null
 
         val engine = SyncEngine(
+            context,
             broadcastDao, subscriptionDao, cryptoService, fileService,
             bleCentralService, blePeripheralService, wifiDirectService, notificationService
         )
@@ -92,11 +94,13 @@ class FinalCoverageTest {
         val blePeripheralService = mockk<BlePeripheralService>(relaxed = true)
         val wifiDirectService = mockk<WifiDirectService>(relaxed = true)
         val notificationService = mockk<NotificationService>(relaxed = true)
+        val context = mockk<Context>(relaxed = true)
         every { broadcastDao.changeFlow } returns MutableStateFlow(0L)
         every { subscriptionDao.changeFlow } returns MutableStateFlow(0L)
         coEvery { bleCentralService.readMeta(any(), any()) } returns null
 
         val engine = SyncEngine(
+            context,
             broadcastDao, subscriptionDao, cryptoService, fileService,
             bleCentralService, blePeripheralService, wifiDirectService, notificationService
         )
@@ -131,8 +135,10 @@ class FinalCoverageTest {
         val blePeripheralService = mockk<BlePeripheralService>(relaxed = true)
         val wifiDirectService = mockk<WifiDirectService>(relaxed = true)
         val notificationService = mockk<NotificationService>(relaxed = true)
+        val context = mockk<Context>(relaxed = true)
 
         val engine = SyncEngine(
+            context,
             broadcastDao, subscriptionDao, cryptoService, fileService,
             bleCentralService, blePeripheralService, wifiDirectService, notificationService
         )

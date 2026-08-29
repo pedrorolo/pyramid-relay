@@ -73,6 +73,7 @@ class BlePeripheralService(private val context: Context, private val transferSem
     }
 
     var onTransferStart: (() -> Unit)? = null
+    var onStreamArmed: (() -> Unit)? = null
     var onTransferEnd: (() -> Unit)? = null
     var isPeerTransferAllowed: ((String) -> Boolean)? = null
     var onUploadStart: ((String) -> Unit)? = null
@@ -170,6 +171,7 @@ class BlePeripheralService(private val context: Context, private val transferSem
                     streamToFileId[device.address] = fileId
                     _activeStreamingFileIds.value = _activeStreamingFileIds.value + fileId
                     EventLog.log("ble", "Stream armed: v$version (${data.size}B) -> ${device.address.takeLast(5)} [active streams: ${_activeStreamingFileIds.value.size}]")
+                    onStreamArmed?.invoke()
                     if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
                     pushStreamTo(device.address)
                 } else if (responseNeeded) {

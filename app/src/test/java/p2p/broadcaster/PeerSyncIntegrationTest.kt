@@ -1,5 +1,6 @@
 package p2p.broadcaster
 
+import android.content.Context
 import io.mockk.*
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -86,15 +87,19 @@ class PeerSyncIntegrationTest {
         broadcastDaoA = mockk(relaxed = true)
         subscriptionDaoA = mockk(relaxed = true)
         notifierA = mockk(relaxed = true)
+        val contextA = mockk<Context>(relaxed = true)
         broadcastDaoB = mockk(relaxed = true)
         subscriptionDaoB = mockk(relaxed = true)
         notifierB = mockk(relaxed = true)
+        val contextB = mockk<Context>(relaxed = true)
 
         engineA = SyncEngine(
+            contextA,
             broadcastDaoA, subscriptionDaoA, cryptoA, fileServiceA,
             bleCentralA, blePeripheralA, wifiDirectA, notifierA
         )
         engineB = SyncEngine(
+            contextB,
             broadcastDaoB, subscriptionDaoB, cryptoB, fileServiceB,
             bleCentralB, blePeripheralB, wifiDirectB, notifierB
         )

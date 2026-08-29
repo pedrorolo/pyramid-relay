@@ -1,5 +1,6 @@
 package p2p.broadcaster
 
+import android.content.Context
 import io.mockk.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -34,6 +35,7 @@ class SyncEngineTest {
     fun setup() {
         Dispatchers.setMain(testDispatcher)
         cryptoService = CryptoService()
+        val context = mockk<Context>(relaxed = true)
         broadcastDao = mockk(relaxed = true)
         subscriptionDao = mockk(relaxed = true)
         fileService = mockk(relaxed = true)
@@ -43,7 +45,7 @@ class SyncEngineTest {
         notificationService = mockk(relaxed = true)
         every { broadcastDao.changeFlow } returns MutableStateFlow(0L)
         every { subscriptionDao.changeFlow } returns MutableStateFlow(0L)
-        engine = SyncEngine(broadcastDao, subscriptionDao, cryptoService, fileService,
+        engine = SyncEngine(context, broadcastDao, subscriptionDao, cryptoService, fileService,
             bleCentralService, blePeripheralService, wifiDirectService, notificationService, kotlinx.coroutines.sync.Semaphore(1), testScope)
     }
 
