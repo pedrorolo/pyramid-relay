@@ -305,6 +305,7 @@ fun SubscriptionRow(
         val status = when {
             isDownloading -> "Downloading"
             isStreaming -> "Relaying"
+            subscription.localVersion == null -> "Searching"
             else -> "Advertising"
         }
         // Log status for debugging
