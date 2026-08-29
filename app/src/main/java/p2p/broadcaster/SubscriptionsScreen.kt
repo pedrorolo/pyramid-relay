@@ -3,8 +3,6 @@ package p2p.broadcaster
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.os.Environment
-import android.provider.MediaStore
 import java.util.Base64
 import kotlin.math.pow
 import kotlin.math.sqrt
@@ -264,38 +262,17 @@ fun SubscriptionRow(
     val app = context.applicationContext as P2PBroadcasterApp
     var showQr by remember { mutableStateOf(false) }
 
-    fun saveToDownloads(): Uri? {
-        if (subscription.localVersion == null) return null
+    val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        if (subscription.localVersion == null) return@rememberLauncherForActivityResult
         val source = app.fileService.getFile(subscription.fileId, subscription.localVersion)
-        if (!source.isFile || source.length() == 0L) return null
-        val fileName = subscription.fileName ?: "file.bin"
-        val resolver = context.contentResolver
-        // Delete existing entry with same name if present
-        resolver.query(
-            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-            arrayOf(MediaStore.Downloads._ID),
-            "${MediaStore.Downloads.DISPLAY_NAME}=?",
-            arrayOf(fileName),
-            null
-        )?.use { c ->
-            if (c.moveToFirst()) {
-                val id = c.getLong(c.getColumnIndexOrThrow(MediaStore.Downloads._ID))
-                resolver.delete(
-                    MediaStore.Downloads.getContentUri("external"),
-                    "${MediaStore.Downloads._ID}=?",
-                    arrayOf(id.toString())
-                )
-            }
+        if (!source.isFile || source.length() == 0L) return@rememberLauncherForActivityResult
+        try {
+            context.contentResolver.openOutputStream(uri)?.use { out -> source.inputStream().use { it.copyTo(out) } }
+            EventLog.log("app", "Saved \"${subscription.fileName}\" to selected location (${source.length()}B)")
+        } catch (e: Exception) {
+            EventLog.log("app", "Failed to save file: ${e.message}")
         }
-        val values = android.content.ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-            put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
-            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-        }
-        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
-        resolver.openOutputStream(uri)?.use { out -> source.inputStream().use { it.copyTo(out) } }
-        EventLog.log("app", "Saved \"$fileName\" to Downloads (${source.length()}B)")
-        return uri
     }
     if (showQr) {
         QrDisplayDialog(
@@ -329,18 +306,7 @@ fun SubscriptionRow(
         } else ""
         val saveOpen: (() -> Unit)? = if (subscription.localVersion != null) {
             {
-                val uri = saveToDownloads()
-                if (uri != null) {
-                    try {
-                        val openIntent = Intent(Intent.ACTION_VIEW).apply {
-                            setDataAndType(uri, context.contentResolver.getType(uri) ?: "application/octet-stream")
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        context.startActivity(openIntent)
-                    } catch (e: Exception) {
-                        EventLog.log("app", "No app to open file: ${e.message}")
-                    }
-                }
+                saveLauncher.launch(subscription.fileName ?: "file.bin")
             }
         } else null
 
@@ -404,7 +370,7 @@ fun SubscriptionRow(
                     }
                     if (subscription.localVersion != null) {
                         IconButton(
-                            onClick = { saveToDownloads() },
+                            onClick = { saveLauncher.launch(subscription.fileName ?: "file.bin") },
                             modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
