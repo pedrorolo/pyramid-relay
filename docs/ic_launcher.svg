@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="0%" r="70%">
+      <stop offset="0%" stop-color="#1E2A3A"/>
+      <stop offset="100%" stop-color="#0D1117"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00E5FF" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#00E5FF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="pyr1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00BFA5"/>
+      <stop offset="100%" stop-color="#00E5FF"/>
+    </linearGradient>
+    <linearGradient id="pyr2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00B8D4"/>
+      <stop offset="100%" stop-color="#448AFF"/>
+    </linearGradient>
+    <linearGradient id="pyr3" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#2979FF"/>
+      <stop offset="100%" stop-color="#651FFF"/>
+    </linearGradient>
+    <linearGradient id="pyr4" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#651FFF"/>
+      <stop offset="100%" stop-color="#AA00FF"/>
+    </linearGradient>
+    <linearGradient id="pyr5" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#AA00FF"/>
+      <stop offset="100%" stop-color="#E040FB"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="108" height="108" fill="url(#bgGrad)"/>
+
+  <!-- Glow behind file icon -->
+  <circle cx="54" cy="36" r="18" fill="url(#glow)"/>
+
+  <!-- Rays -->
+  <line x1="54" y1="36" x2="54" y2="16" stroke="#FFD54F" stroke-opacity="0.19" stroke-width="0.6"/>
+  <line x1="54" y1="36" x2="40" y2="18" stroke="#FFD54F" stroke-opacity="0.15" stroke-width="0.5"/>
+  <line x1="54" y1="36" x2="68" y2="18" stroke="#FFD54F" stroke-opacity="0.15" stroke-width="0.5"/>
+  <line x1="54" y1="36" x2="34" y2="24" stroke="#FFD54F" stroke-opacity="0.10" stroke-width="0.4"/>
+  <line x1="54" y1="36" x2="74" y2="24" stroke="#FFD54F" stroke-opacity="0.10" stroke-width="0.4"/>
+
+  <!-- Triangle frame -->
+  <polygon points="54,22 38,50 70,50" fill="none" stroke="#FFD54F" stroke-opacity="0.50" stroke-width="1.2"/>
+
+  <!-- Retro file icon body -->
+  <polygon points="47,28 57,28 63,34 63,48 47,48" fill="#FFFFFF"/>
+
+  <!-- Dog-ear fold -->
+  <polygon points="57,28 57,34 63,34" fill="#C8C8E0"/>
+
+  <!-- Content lines -->
+  <line x1="50" y1="37" x2="60" y2="37" stroke="#00E5FF" stroke-width="1.2"/>
+  <line x1="50" y1="40" x2="58" y2="40" stroke="#7C4DFF" stroke-width="1.2"/>
+  <line x1="50" y1="43" x2="56" y2="43" stroke="#FFAB40" stroke-width="1.2"/>
+
+  <!-- Pyramid steps -->
+  <rect x="26" y="78" width="56" height="4" fill="url(#pyr1)"/>
+  <rect x="30" y="73" width="48" height="5" fill="url(#pyr2)"/>
+  <rect x="34" y="68" width="40" height="5" fill="url(#pyr3)"/>
+  <rect x="38" y="63" width="32" height="5" fill="url(#pyr4)"/>
+  <rect x="42" y="58" width="24" height="5" fill="url(#pyr5)"/>
+</svg>
