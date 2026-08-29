@@ -21,9 +21,9 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 
 - **Single-activity** Compose app with bottom nav (Broadcasts | Subscriptions | Log)
 - **BLE GATT** is the primary transfer mechanism (not Wi-Fi Direct — dropped)
-- **16-bit service UUID**: `0000f4b7-0000-1000-8000-00805f9b34fb` — fits in 31B legacy advertising packet (21B on wire)
+- **128-bit service UUID**: `0000f47b-0000-1000-8000-00805f9b34fb` — fits in 31B legacy advertising packet (21B on wire)
 - **Notification-based streaming**: Peripheral pushes chunks via `notifyCharacteristicChanged` (512B per chunk, 10ms sleep between chunks)
-- **Samsung BLE quirk**: The BLE stack silently drops service data from scan results. Fixed with periodic scan restart (every 60s).
+- **Samsung BLE quirk**: The BLE stack silently drops service data from scan results. Fixed with periodic scan restart (every 5 minutes).
 
 ## Key Constraints
 
@@ -38,9 +38,11 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 ## Transfer Limits
 
 - **Max file size**: 20 MB (enforced at UI level in `BroadcastsViewModel`)
-- **Max concurrent transfers**: 1 download + 1 upload at a time (Semaphore-based)
+- **Max concurrent transfers**: 1 transfer at a time (upload OR download) — enforced by shared `transferSemaphore`
 - **Max retries**: 3 attempts per file (prevents infinite retry loops)
 - **Rotation interval**: 10 seconds (paused during active transfers)
+- **Download timeout**: 10 minutes per file
+- **BLE timeouts**: 30s base for meta read and fetchFile operations
 
 ## File Structure
 
@@ -52,7 +54,7 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 
 - **BlePeripheralService**: GATT server with rotating advertising (single advertising set rotates through files)
 - **BleCentralService**: GATT client that connects, reads META, then streams file via notifications
-- **SyncEngine**: Orchestrates scanning, advertising, and transfers; tracks download/upload progress
+- **SyncEngine**: Orchestrates scanning, advertising, and transfers; tracks download/upload progress; manages Bluetooth state
 - **BroadcastsViewModel**: Manages broadcasts (Role.ORIGINATOR only shown in UI)
 - **SubscriptionsViewModel**: Manages subscriptions; downloads trigger relay (Role.RELAY)
 
@@ -63,6 +65,22 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 - Progress is determinate (shows actual bytes transferred vs total)
 - Upload progress caps at 99% during transfer, switches to indeterminate indicator in UI
 
+## Transfer Coordination
+
+- **Shared `transferSemaphore`** (Semaphore(1)) between SyncEngine and BlePeripheralService ensures only one transfer at a time
+- **`activeDownloadPeers`** and **`activeUploadPeers`** concurrent sets for cross-component coordination
+- **`onStreamArmed`** callback: BlePeripheralService → SyncEngine calls `stopAdvertisingAndScanning()` immediately when a stream is armed
+- **`onTransferStart`/`onTransferEnd`** callbacks: BlePeripheralService → SyncEngine stops/resumes advertising+scanning
+- Download paths wait while `activeUploadPeers.contains(deviceAddress)` before acquiring transferSemaphore
+- **`cancelTransfer(fileId)`**: Cancels active download jobs and stops uploads for a file
+- **Periodic scan/GATT restart skipped during transfers**: Checks `_downloadingFileIds.value.isNotEmpty() || activeUploadPeers.isNotEmpty()`
+
+## Bluetooth State Handling
+
+- **BroadcastReceiver** listens for `BluetoothAdapter.ACTION_STATE_CHANGED`
+- **STATE_OFF**: Cancels all active transfers, stops scanning and advertising
+- **STATE_ON**: Restarts GATT server, scanning, and re-adverts all broadcasts
+
 ## Gotchas
 
 - `BlePeripheralService` GATT server: `PERMISSION_READ` must be set on characteristics or reads fail with `GATT_READ_NOT_PERMITTED` (status=2)
@@ -71,9 +89,12 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 - `publicKeyToBase64` uses URL-safe base64; `publicKeyFromBase64` accepts both URL-safe and standard
 - `BleForegroundService` acquires partial wake lock — release in `onDestroy()`
 - **Buffer flush on disconnect**: Received data is written to file even if transfer is interrupted
-- **Periodic scan restart**: BLE scan restarts every 60s to fix Samsung BLE stack dropping service data
+- **Periodic scan restart**: BLE scan restarts every 5 minutes to fix Samsung BLE stack dropping service data
+- **Periodic GATT server restart**: Every 2 minutes to fix META characteristic not found (skipped during transfers)
 - **Atomic download guard**: Uses Mutex + Semaphore to prevent concurrent downloads for same fileId
 - **File size enforcement**: 20MB limit checked in UI before import (not in FileService)
+- **Meta read retries**: 5 attempts (Samsung BLE connections frequently fail on first attempt)
+- **Delete cancels transfers**: `deleteBroadcast` and `deleteSubscription` call `cancelTransfer` first
 
 ## EventLog
 
