@@ -164,6 +164,10 @@ class SyncEngine(
             launch {
                 while (true) {
                     kotlinx.coroutines.delay(120_000L)
+                    if (_downloadingFileIds.value.isNotEmpty() || activeUploadPeers.isNotEmpty()) {
+                        EventLog.log("ble", "Periodic GATT server restart skipped (transfer in progress)")
+                        continue
+                    }
                     try {
                         blePeripheralService.restartGattServer()
                         EventLog.log("ble", "GATT server restarted (periodic)")
