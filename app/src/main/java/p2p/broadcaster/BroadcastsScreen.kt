@@ -126,6 +126,7 @@ class BroadcastsViewModel(
 
     fun deleteBroadcast(broadcast: BroadcastEntity) {
         viewModelScope.launch {
+            syncEngine?.cancelTransfer(broadcast.fileId)
             syncEngine?.stopAdvertisingForFile(broadcast.fileId)
             fileService.deleteAll(broadcast.fileId)
             broadcastDao.delete(broadcast.fileId)

@@ -276,6 +276,18 @@ class BlePeripheralService(private val context: Context, private val transferSem
         }.start()
     }
 
+    fun stopStreaming(fileId: String) {
+        val addresses = streamToFileId.entries.filter { it.value == fileId }.map { it.key }
+        for (address in addresses) {
+            streams.remove(address)
+            streamToFileId.remove(address)
+            pushing.remove(address)
+            _activeStreamingFileIds.value = _activeStreamingFileIds.value - fileId
+            _streamingProgress.value = _streamingProgress.value - fileId
+            EventLog.log("ble", "Stopped streaming ${fileId.takeLast(8)} to ${address.takeLast(5)}")
+        }
+    }
+
     @SuppressLint("MissingPermission")
     fun startAdvertising(fileId: String, serviceData: ByteArray) {
         // Already tracking this file — skip (idempotent).

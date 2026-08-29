@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,6 +62,7 @@ class SyncEngine(
 
     private val _downloadingFileIds = MutableStateFlow<Set<String>>(emptySet())
     val downloadingFileIds: StateFlow<Set<String>> = _downloadingFileIds.asStateFlow()
+    private val activeDownloadJobs = ConcurrentHashMap<String, Job>()
     private val downloadMutex = Mutex()
     private val downloadSemaphore = Semaphore(1) // Only one download at a time
     private val uploadSemaphore = Semaphore(1) // Only one upload at a time
@@ -337,6 +339,7 @@ class SyncEngine(
         peerLock(deviceAddress).withLock {
             _downloadingFileIds.value = _downloadingFileIds.value + broadcast.fileId
             activeDownloadPeers.add(deviceAddress)
+            activeDownloadJobs[broadcast.fileId] = currentCoroutineContext()[Job]!!
             stopAdvertisingAndScanning()
             EventLog.log("sync", "Download started for \"${broadcast.fileName}\" v$newVersion from ${deviceAddress.takeLast(5)}")
         try {
@@ -404,6 +407,7 @@ class SyncEngine(
             activeDownloadPeers.remove(deviceAddress)
             _downloadingFileIds.value = _downloadingFileIds.value - broadcast.fileId
             _downloadProgress.value = _downloadProgress.value - broadcast.fileId
+            activeDownloadJobs.remove(broadcast.fileId)
             resumeAdvertisingAndScanning()
             EventLog.log("sync", "Download finished for \"${broadcast.fileName}\"")
         }
@@ -436,6 +440,7 @@ class SyncEngine(
         peerLock(deviceAddress).withLock {
             _downloadingFileIds.value = _downloadingFileIds.value + subscription.fileId
             activeDownloadPeers.add(deviceAddress)
+            activeDownloadJobs[subscription.fileId] = currentCoroutineContext()[Job]!!
             stopAdvertisingAndScanning()
             EventLog.log("sync", "Download started for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion from ${deviceAddress.takeLast(5)}")
         var downloadResult = false
@@ -542,12 +547,14 @@ class SyncEngine(
         if (!downloadResult) {
             _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId
             _downloadProgress.value = _downloadProgress.value - subscription.fileId
+            activeDownloadJobs.remove(subscription.fileId)
             resumeAdvertisingAndScanning()
             return false
         }
         activeDownloadPeers.remove(deviceAddress)
         _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId
         _downloadProgress.value = _downloadProgress.value - subscription.fileId
+        activeDownloadJobs.remove(subscription.fileId)
         resumeAdvertisingAndScanning()
         return true
         } // peerLock
@@ -559,6 +566,14 @@ class SyncEngine(
         advertisedFiles.remove(fileId)
         clearDiscoveryStateForFile(fileId)
         EventLog.log("adv", "Stopped relaying ${fileId.takeLast(8)} and reset its discovery state")
+    }
+
+    fun cancelTransfer(fileId: String) {
+        activeDownloadJobs.remove(fileId)?.let {
+            it.cancel()
+            EventLog.log("sync", "Cancelled active download for ${fileId.takeLast(8)}")
+        }
+        blePeripheralService.stopStreaming(fileId)
     }
 
     /**
