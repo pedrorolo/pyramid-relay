@@ -25,7 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.runBlocking
 
-class BlePeripheralService(private val context: Context) {
+class BlePeripheralService(private val context: Context, private val transferSemaphore: kotlinx.coroutines.sync.Semaphore = kotlinx.coroutines.sync.Semaphore(1)) {
     companion object {
         private const val TAG = "BlePeripheral"
     private val SERVICE_UUID = UUID.fromString(APP_SERVICE_UUID)
@@ -71,6 +71,9 @@ class BlePeripheralService(private val context: Context) {
     fun setMetaPayloadProvider(provider: suspend (String) -> BleMetaPayload?) {
         metaPayloadProvider = provider
     }
+
+    var onTransferStart: (() -> Unit)? = null
+    var onTransferEnd: (() -> Unit)? = null
 
     @SuppressLint("MissingPermission")
     fun startGattServer() {
@@ -216,6 +219,9 @@ class BlePeripheralService(private val context: Context) {
         Thread {
             try {
                 uploadSemaphore.acquire()
+                runBlocking { transferSemaphore.acquire() }
+                // Transfer actually starting - notify callback to stop advertising/scanning
+                onTransferStart?.invoke()
                 val server = gattServer ?: return@Thread
                 val char = streamCharacteristic() ?: return@Thread
                 var logged = 0
@@ -245,6 +251,9 @@ class BlePeripheralService(private val context: Context) {
                 }
             } finally {
                 uploadSemaphore.release()
+                transferSemaphore.release()
+                // Transfer ended - notify callback to resume advertising/scanning
+                onTransferEnd?.invoke()
                 pushing.remove(address)
                 val fId = streamToFileId.remove(address)
                 if (fId != null) {

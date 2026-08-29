@@ -36,6 +36,7 @@ class SyncEngine(
     private val blePeripheralService: BlePeripheralService,
     private val wifiDirectService: WifiDirectService,
     private val notificationService: NotificationService,
+    private val transferSemaphore: kotlinx.coroutines.sync.Semaphore = kotlinx.coroutines.sync.Semaphore(1),
     testScope: CoroutineScope? = null
 ) {
     companion object {
@@ -283,7 +284,8 @@ class SyncEngine(
                 return false
             }
         }
-        // Only one download at a time
+        // Only one transfer (upload OR download) at a time
+        transferSemaphore.withPermit {
         downloadSemaphore.withPermit {
             _downloadingFileIds.value = _downloadingFileIds.value + broadcast.fileId
             EventLog.log("sync", "Download started for \"${broadcast.fileName}\" v$newVersion from ${deviceAddress.takeLast(5)}")
@@ -353,6 +355,7 @@ class SyncEngine(
             _downloadProgress.value = _downloadProgress.value - broadcast.fileId
             EventLog.log("sync", "Download finished for \"${broadcast.fileName}\"")
         }
+        } // transferSemaphore
         }
     }
 

@@ -44,7 +44,7 @@ class SyncEngineTest {
         every { broadcastDao.changeFlow } returns MutableStateFlow(0L)
         every { subscriptionDao.changeFlow } returns MutableStateFlow(0L)
         engine = SyncEngine(broadcastDao, subscriptionDao, cryptoService, fileService,
-            bleCentralService, blePeripheralService, wifiDirectService, notificationService, testScope)
+            bleCentralService, blePeripheralService, wifiDirectService, notificationService, kotlinx.coroutines.sync.Semaphore(1), testScope)
     }
 
     @After

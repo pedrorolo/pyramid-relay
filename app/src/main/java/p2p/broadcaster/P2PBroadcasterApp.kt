@@ -33,11 +33,12 @@ class P2PBroadcasterApp : Application() {
         fileService = FileService(this)
         notificationService = NotificationService(this)
         bleCentralService = BleCentralService(this)
-        blePeripheralService = BlePeripheralService(this)
+        val transferSemaphore = kotlinx.coroutines.sync.Semaphore(1) // Only one transfer at a time
+        blePeripheralService = BlePeripheralService(this, transferSemaphore)
         wifiDirectService = WifiDirectService(this)
         syncEngine = SyncEngine(
             broadcastDao, subscriptionDao, cryptoService, fileService,
-            bleCentralService, blePeripheralService, wifiDirectService, notificationService
+            bleCentralService, blePeripheralService, wifiDirectService, notificationService, transferSemaphore
         )
         syncEngine.start()
     }
