@@ -138,12 +138,7 @@ class SyncEngine(
             blePeripheralService.onUploadStart = { address -> activeUploadPeers.add(address) }
             blePeripheralService.onUploadEnd = { address -> activeUploadPeers.remove(address) }
             blePeripheralService.onTransferStart = { stopAdvertisingAndScanning() }
-            blePeripheralService.onTransferEnd = {
-                // Upload is done — only check if a download is still active
-                if (_downloadingFileIds.value.isEmpty()) {
-                    resumeAdvertisingAndScanning()
-                }
-            }
+            blePeripheralService.onTransferEnd = { resumeAdvertisingAndScanning() }
             blePeripheralService.onStreamArmed = { stopAdvertisingAndScanning() }
             // Retry GATT server if initial attempt fails (permissions may not be ready yet after fresh install)
             for (attempt in 1..5) {
@@ -247,9 +242,6 @@ class SyncEngine(
     }
 
     fun resumeAdvertisingAndScanning() {
-        if (_downloadingFileIds.value.isNotEmpty() || activeUploadPeers.isNotEmpty()) {
-            return
-        }
         scope.launch {
             try {
                 bleCentralService.startScan()
@@ -478,9 +470,7 @@ class SyncEngine(
             _downloadProgress.value = _downloadProgress.value - broadcast.fileId
             downloadingFileDeviceMap.remove(broadcast.fileId)
             activeDownloadJobs.remove(broadcast.fileId)
-            if (activeUploadPeers.isEmpty()) {
-                resumeAdvertisingAndScanning()
-            }
+            resumeAdvertisingAndScanning()
             EventLog.log("sync", "Download finished for \"${broadcast.fileName}\"")
         }
         } // peerLock
@@ -630,9 +620,7 @@ class SyncEngine(
             _downloadProgress.value = _downloadProgress.value - subscription.fileId
             downloadingFileDeviceMap.remove(subscription.fileId)
             activeDownloadJobs.remove(subscription.fileId)
-            if (activeUploadPeers.isEmpty()) {
-                resumeAdvertisingAndScanning()
-            }
+            resumeAdvertisingAndScanning()
             return false
         }
         activeDownloadPeers.remove(deviceAddress)
@@ -640,9 +628,7 @@ class SyncEngine(
         _downloadProgress.value = _downloadProgress.value - subscription.fileId
         downloadingFileDeviceMap.remove(subscription.fileId)
         activeDownloadJobs.remove(subscription.fileId)
-        if (activeUploadPeers.isEmpty()) {
-            resumeAdvertisingAndScanning()
-        }
+        resumeAdvertisingAndScanning()
         return true
         } // peerLock
         }
