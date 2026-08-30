@@ -4,7 +4,9 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
 import com.pyramidrelay.EventLog
@@ -15,27 +17,30 @@ class BleForegroundService : Service() {
         private const val TAG = "BleFgService"
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "ble_foreground"
+        private const val NOTIFICATION_CHECK_INTERVAL_MS = 5_000L
     }
 
     private var syncEngine: SyncEngine? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private val notificationService by lazy { NotificationService(this) }
+    private val handler = Handler(Looper.getMainLooper())
+    private val notificationChecker = object : Runnable {
+        override fun run() {
+            rePostNotification()
+            handler.postDelayed(this, NOTIFICATION_CHECK_INTERVAL_MS)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         val app = application as P2PBroadcasterApp
         syncEngine = app.syncEngine
-        try {
-            NotificationService(this).createForegroundNotification()?.let {
-                startForeground(NOTIFICATION_ID, it, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start foreground", e)
-            EventLog.log("ble", "Failed to start foreground service: ${e.message}")
-        }
+        rePostNotification()
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "p2p.broadcaster:ble").apply {
             acquire()
         }
+        handler.post(notificationChecker)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -52,9 +57,20 @@ class BleForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        handler.removeCallbacks(notificationChecker)
         wakeLock?.let { if (it.isHeld) it.release() }
         syncEngine?.stop()
         super.onDestroy()
         Log.d(TAG, "BLE foreground service stopped")
+    }
+
+    private fun rePostNotification() {
+        try {
+            notificationService.createForegroundNotification()?.let {
+                startForeground(NOTIFICATION_ID, it, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to re-post foreground notification", e)
+        }
     }
 }
