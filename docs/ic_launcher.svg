@@ -1,66 +1,39 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
-  <defs>
-    <radialGradient id="bgGrad" cx="50%" cy="0%" r="70%">
-      <stop offset="0%" stop-color="#1E2A3A"/>
-      <stop offset="100%" stop-color="#0D1117"/>
-    </radialGradient>
-    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#00E5FF" stop-opacity="0.25"/>
-      <stop offset="100%" stop-color="#00E5FF" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="pyr1" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#00BFA5"/>
-      <stop offset="100%" stop-color="#00E5FF"/>
-    </linearGradient>
-    <linearGradient id="pyr2" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#00B8D4"/>
-      <stop offset="100%" stop-color="#448AFF"/>
-    </linearGradient>
-    <linearGradient id="pyr3" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#2979FF"/>
-      <stop offset="100%" stop-color="#651FFF"/>
-    </linearGradient>
-    <linearGradient id="pyr4" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#651FFF"/>
-      <stop offset="100%" stop-color="#AA00FF"/>
-    </linearGradient>
-    <linearGradient id="pyr5" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#AA00FF"/>
-      <stop offset="100%" stop-color="#E040FB"/>
-    </linearGradient>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<defs>
+  <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#f7e8c5"/><stop offset="1" stop-color="#d9bc83"/></linearGradient>
+  <linearGradient id="face" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#f5d879"/><stop offset="1" stop-color="#cf7b20"/></linearGradient>
+  <linearGradient id="side" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#d79a3c"/><stop offset="1" stop-color="#a85d1d"/></linearGradient>
+  <mask id="rayMask">
+    <rect width="512" height="512" fill="white"/>
+    <polygon points="256,72 204,205 308,205" fill="black"/>
+    <circle cx="256" cy="158" r="70" fill="black"/>
+  </mask>
+</defs>
+<rect width="512" height="512" fill="url(#paper)"/>
+<!-- Rays originate at the file center; masking hides the inner circle and triangle -->
+<g mask="url(#rayMask)" stroke="#FFF8D6" stroke-linecap="round" fill="none">
+<path d="M256 158V30 M256 158L198 42 M256 158L314 42 M256 158L145 78 M256 158L367 78 M256 158L124 105 M256 158L388 105 M256 158L110 136 M256 158L402 136 M256 158L105 175 M256 158L407 175" stroke-width="3" stroke-opacity=".92"/>
+<path d="M256 158L214 38 M256 158L298 38 M256 158L180 68 M256 158L332 68 M256 158L135 119 M256 158L377 119 M256 158L120 205 M256 158L392 205" stroke-width="2" stroke-opacity=".75"/>
+</g>
 
-  <!-- Background -->
-  <rect width="108" height="108" fill="url(#bgGrad)"/>
-
-  <!-- Glow behind file icon -->
-  <circle cx="54" cy="36" r="18" fill="url(#glow)"/>
-
-  <!-- Rays -->
-  <line x1="54" y1="36" x2="54" y2="16" stroke="#FFD54F" stroke-opacity="0.19" stroke-width="0.6"/>
-  <line x1="54" y1="36" x2="40" y2="18" stroke="#FFD54F" stroke-opacity="0.15" stroke-width="0.5"/>
-  <line x1="54" y1="36" x2="68" y2="18" stroke="#FFD54F" stroke-opacity="0.15" stroke-width="0.5"/>
-  <line x1="54" y1="36" x2="34" y2="24" stroke="#FFD54F" stroke-opacity="0.10" stroke-width="0.4"/>
-  <line x1="54" y1="36" x2="74" y2="24" stroke="#FFD54F" stroke-opacity="0.10" stroke-width="0.4"/>
-
-  <!-- Triangle frame -->
-  <polygon points="54,22 38,50 70,50" fill="none" stroke="#FFD54F" stroke-opacity="0.50" stroke-width="1.2"/>
-
-  <!-- Retro file icon body -->
-  <polygon points="47,28 57,28 63,34 63,48 47,48" fill="#FFFFFF"/>
-
-  <!-- Dog-ear fold -->
-  <polygon points="57,28 57,34 63,34" fill="#C8C8E0"/>
-
-  <!-- Content lines -->
-  <line x1="50" y1="37" x2="60" y2="37" stroke="#00E5FF" stroke-width="1.2"/>
-  <line x1="50" y1="40" x2="58" y2="40" stroke="#7C4DFF" stroke-width="1.2"/>
-  <line x1="50" y1="43" x2="56" y2="43" stroke="#FFAB40" stroke-width="1.2"/>
-
-  <!-- Pyramid steps -->
-  <rect x="26" y="78" width="56" height="4" fill="url(#pyr1)"/>
-  <rect x="30" y="73" width="48" height="5" fill="url(#pyr2)"/>
-  <rect x="34" y="68" width="40" height="5" fill="url(#pyr3)"/>
-  <rect x="38" y="63" width="32" height="5" fill="url(#pyr4)"/>
-  <rect x="42" y="58" width="24" height="5" fill="url(#pyr5)"/>
+<!-- Apex triangle -->
+<polygon points="256,105 204,205 308,205" fill="#fff5d7" fill-opacity=".35" stroke="#694719" stroke-width="5"/>
+<!-- Retro file icon -->
+<polygon points="232,130 268,130 288,150 288,190 232,190" fill="#fffdf0" stroke="#694719" stroke-width="3"/>
+<polygon points="268,130 268,150 288,150" fill="#d9b56e" stroke="#694719" stroke-width="2"/>
+<g stroke="#b96924" stroke-width="5" stroke-linecap="round"><path d="M242 160h36"/><path d="M242 174h28"/><path d="M242 187h20"/></g>
+<!-- 3D body starts at the exact base of the capstone triangle -->
+<!-- 3D right side, behind front face -->
+<polygon points="308,205 440,410 425,430" fill="url(#side)" stroke="#694719" stroke-width="4"/>
+<g stroke="#744722" stroke-width="2" opacity=".7"><path d="M274 250l91 157"/><path d="M283 256l92 151"/><path d="M292 270l87 137"/><path d="M302 282l82 125"/><path d="M312 298l75 109"/><path d="M322 314l65 93"/><path d="M332 330l55 77"/></g>
+<!-- Broad front face -->
+<polygon points="204,205 308,205 425,430 87,430" fill="url(#face)" stroke="#694719" stroke-width="5" stroke-linejoin="round"/>
+<!-- Horizontal engraved hatch lines -->
+<g stroke="#71491f" stroke-width="2" stroke-linecap="round" opacity=".65">
+<path d="M232 240h48"/><path d="M220 258h72"/><path d="M207 276h98"/><path d="M193 294h126"/><path d="M179 312h154"/><path d="M165 330h182"/><path d="M151 348h210"/><path d="M136 366h228"/><path d="M121 384h243"/><path d="M106 402h248"/><path d="M89 420h259"/>
+</g>
+<g stroke="#8c5b25" stroke-width="1" opacity=".45">
+<path d="M226 247h60"/><path d="M214 265h84"/><path d="M201 283h110"/><path d="M187 301h138"/><path d="M173 319h166"/><path d="M159 337h194"/><path d="M145 355h222"/><path d="M130 373h239"/><path d="M115 391h249"/><path d="M100 409h254"/>
+</g>
+<path d="M87 430h338" stroke="#694719" stroke-width="5"/>
 </svg>

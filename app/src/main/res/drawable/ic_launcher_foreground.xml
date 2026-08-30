@@ -1,180 +1,25 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Rays radiate from the file center; only the portions outside the triangle are visible -->
+    <path android:pathData="M54,18 L54,8 M47,22 L37,10 M61,22 L71,10 M43,27 L26,16 M65,27 L82,16 M40,34 L24,28 M68,34 L84,28" android:strokeWidth="0.55" android:strokeColor="#F0FFF8D6" />
+    <path android:pathData="M54,18 L54,9 M46,22 L34,12 M62,22 L74,12 M42,28 L27,18 M66,28 L81,18 M54,33 L25,43 M54,33 L83,43" android:strokeWidth="0.35" android:strokeColor="#E0FFF8D6" />
 
-    <!-- Subtle glow behind the file icon -->
-    <path android:pathData="M54,36 m-18,0 a18,18 0 1,1 36,0 a18,18 0 1,1 -36,0">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:startX="54"
-                android:startY="18"
-                android:endX="54"
-                android:endY="54"
-                android:gradientRadius="18"
-                android:type="radial">
-                <item
-                    android:color="#4000E5FF"
-                    android:offset="0.0" />
-                <item
-                    android:color="#00000000"
-                    android:offset="1.0" />
-            </gradient>
-        </aapt:attr>
-    </path>
+    <!-- Apex triangle -->
+    <path android:pathData="M54,22 L43,43 L65,43 Z" android:strokeWidth="1.0" android:strokeColor="#FF5A4218" android:fillColor="#FFF0D060" />
 
-    <!-- Rays emanating from behind the file icon -->
-    <path
-        android:pathData="M54,36 L54,16"
-        android:strokeWidth="0.6"
-        android:strokeColor="#30FFD54F" />
-    <path
-        android:pathData="M54,36 L40,18"
-        android:strokeWidth="0.5"
-        android:strokeColor="#25FFD54F" />
-    <path
-        android:pathData="M54,36 L68,18"
-        android:strokeWidth="0.5"
-        android:strokeColor="#25FFD54F" />
-    <path
-        android:pathData="M54,36 L34,24"
-        android:strokeWidth="0.4"
-        android:strokeColor="#1AFFD54F" />
-    <path
-        android:pathData="M54,36 L74,24"
-        android:strokeWidth="0.4"
-        android:strokeColor="#1AFFD54F" />
+    <!-- Retro text-editor file icon -->
+    <path android:pathData="M49,27 L57,27 L61,31 L61,40 L49,40 Z" android:fillColor="#FFFDF3D8" android:strokeWidth="0.55" android:strokeColor="#FF5A4218" />
+    <path android:pathData="M57,27 L57,31 L61,31 Z" android:fillColor="#FFD9B96F" />
+    <path android:pathData="M51,33 L59,33 M51,35.5 L58,35.5 M51,38 L56,38" android:strokeWidth="0.75" android:strokeColor="#FF9A5B22" />
 
-    <!-- Triangle frame (Masonic eye triangle) -->
-    <path
-        android:pathData="M54,22 L38,50 L70,50 Z"
-        android:strokeWidth="1.2"
-        android:strokeColor="#80FFD54F"
-        android:fillColor="#00000000" />
+    <!-- 3D body begins exactly at the capstone triangle base -->
+    <!-- Narrow engraved right face -->
+    <path android:pathData="M65,43 L96,82 L88,87 Z" android:fillColor="#FFB87928" android:strokeWidth="0.7" android:strokeColor="#FF5A4218" />
+    <path android:pathData="M58,51 L77,82 M60,53 L79,81 M62,56 L80,79 M64,59 L81,77 M66,62 L82,75 M68,65 L82,73" android:strokeWidth="0.45" android:strokeColor="#905A3518" />
 
-    <!-- Retro file icon body -->
-    <path
-        android:pathData="M47,28 L57,28 L63,34 L63,48 L47,48 Z"
-        android:fillColor="#FFFFFFFF" />
-
-    <!-- File icon dog-ear fold -->
-    <path
-        android:pathData="M57,28 L57,34 L63,34 Z"
-        android:fillColor="#FFC8C8E0" />
-
-    <!-- File icon content lines (retro text editor style) -->
-    <path
-        android:pathData="M50,37 L60,37"
-        android:strokeWidth="1.2"
-        android:strokeColor="#FF00E5FF" />
-    <path
-        android:pathData="M50,40 L58,40"
-        android:strokeWidth="1.2"
-        android:strokeColor="#FF7C4DFF" />
-    <path
-        android:pathData="M50,43 L56,43"
-        android:strokeWidth="1.2"
-        android:strokeColor="#FFFFAB40" />
-
-    <!-- Pyramid step 1 (base, widest) -->
-    <path
-        android:pathData="M26,78 L82,78 L82,82 L26,82 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:startX="26"
-                android:startY="78"
-                android:endX="82"
-                android:endY="78"
-                android:type="linear">
-                <item
-                    android:color="#FF00BFA5"
-                    android:offset="0.0" />
-                <item
-                    android:color="#FF00E5FF"
-                    android:offset="1.0" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- Pyramid step 2 -->
-    <path
-        android:pathData="M30,73 L78,73 L78,78 L30,78 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:startX="30"
-                android:startY="73"
-                android:endX="78"
-                android:endY="73"
-                android:type="linear">
-                <item
-                    android:color="#FF00B8D4"
-                    android:offset="0.0" />
-                <item
-                    android:color="#FF448AFF"
-                    android:offset="1.0" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- Pyramid step 3 -->
-    <path
-        android:pathData="M34,68 L74,68 L74,73 L34,73 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:startX="34"
-                android:startY="68"
-                android:endX="74"
-                android:endY="68"
-                android:type="linear">
-                <item
-                    android:color="#FF2979FF"
-                    android:offset="0.0" />
-                <item
-                    android:color="#FF651FFF"
-                    android:offset="1.0" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- Pyramid step 4 -->
-    <path
-        android:pathData="M38,63 L70,63 L70,68 L38,68 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:startX="38"
-                android:startY="63"
-                android:endX="70"
-                android:endY="63"
-                android:type="linear">
-                <item
-                    android:color="#FF651FFF"
-                    android:offset="0.0" />
-                <item
-                    android:color="#FFAA00FF"
-                    android:offset="1.0" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- Pyramid step 5 (top, narrowest) -->
-    <path
-        android:pathData="M42,58 L66,58 L66,63 L42,63 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:startX="42"
-                android:startY="58"
-                android:endX="66"
-                android:endY="58"
-                android:type="linear">
-                <item
-                    android:color="#FFAA00FF"
-                    android:offset="0.0" />
-                <item
-                    android:color="#FFE040FB"
-                    android:offset="1.0" />
-            </gradient>
-        </aapt:attr>
-    </path>
+    <!-- Broad engraved pyramid face -->
+    <path android:pathData="M43,43 L65,43 L88,87 L20,87 Z" android:fillColor="#FFE3A83E" android:strokeWidth="0.8" android:strokeColor="#FF5A4218" />
+    <!-- Dense horizontal engraving -->
+    <path android:pathData="M49,50 L59,50 M45,55 L63,55 M41,60 L67,60 M37,65 L71,65 M33,70 L72,70 M29,75 L73,75 M24,80 L74,80 M19,85 L75,85" android:strokeWidth="0.45" android:strokeColor="#704B3518" />
+    <path android:pathData="M47,52 L60,52 M43,57 L65,57 M39,62 L69,62 M35,67 L71,67 M31,72 L72,72 M27,77 L73,77 M22,82 L74,82" android:strokeWidth="0.25" android:strokeColor="#805A3518" />
+    <path android:pathData="M20,87 L88,87" android:strokeWidth="0.9" android:strokeColor="#FF5A4218" />
 </vector>

@@ -11,13 +11,15 @@
                 android:startY="0"
                 android:endX="54"
                 android:endY="108"
-                android:gradientRadius="76"
-                android:type="radial">
+                android:type="linear">
                 <item
-                    android:color="#FF1E2A3A"
+                    android:color="#FFF5E6C8"
                     android:offset="0.0" />
                 <item
-                    android:color="#FF0D1117"
+                    android:color="#FFE8D5A8"
+                    android:offset="0.5" />
+                <item
+                    android:color="#FFD9C08E"
                     android:offset="1.0" />
             </gradient>
         </aapt:attr>
