@@ -21,7 +21,7 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 
 - **Single-activity** Compose app with bottom nav (Broadcasts | Subscriptions | Log)
 - **BLE GATT** is the primary transfer mechanism (not Wi-Fi Direct — dropped)
-- **128-bit service UUID**: `0000f47b-0000-1000-8000-00805f9b34fb` — fits in 31B legacy advertising packet (21B on wire)
+- **128-bit service UUID**: `efe0eeec-0236-41f3-920c-ae56e6f0f221`
 - **Notification-based streaming**: Peripheral pushes chunks via `notifyCharacteristicChanged` (512B per chunk, 10ms sleep between chunks)
 - **Samsung BLE quirk**: The BLE stack silently drops service data from scan results. Fixed with periodic scan restart (every 5 minutes).
 - **Encrypted payloads**: Files are compressed first, then encrypted with a hybrid RSA/AES-GCM envelope before transfer.

@@ -5,10 +5,10 @@ package p2p.broadcaster
 // UUID16 + 14B payload) = 21B. A 128-bit UUID would cost 16B more (35B total)
 // and fail with ADVERTISE_FAILED_DATA_TOO_LARGE. GATT characteristics stay
 // 128-bit - they never appear in the advertisement.
-const val APP_SERVICE_UUID = "0000f47b-0000-1000-8000-00805f9b34fb"
-const val META_CHAR_UUID = "f47b5e2a-1c3d-4a6e-8b9f-0d2e4f6a8c0c"
-const val INFO_CHAR_UUID = "f47b5e2a-1c3d-4a6e-8b9f-0d2e4f6a8c0d"
-const val STREAM_CHAR_UUID = "f47b5e2a-1c3d-4a6e-8b9f-0d2e4f6a8c0e"
+const val APP_SERVICE_UUID = "efe0eeec-0236-41f3-920c-ae56e6f0f221"
+const val META_CHAR_UUID = "ca08f59d-d14c-482f-9807-323bd9c0a4bd"
+const val INFO_CHAR_UUID = "0b9e7c30-cc29-42ce-b277-91bc610a2347"
+const val STREAM_CHAR_UUID = "128201a5-9f2b-4f99-b1a7-dfde7a64be06"
 const val TRANSFER_PORT = 8988
 // GATT-only transfer (option C): conservative Android-to-Android BLE throughput
 // is ~50 KB/s; a 100 MB file therefore takes at most ~33 minutes to transfer.
