@@ -100,7 +100,7 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 - `BleForegroundService` acquires partial wake lock — release in `onDestroy()`
 - **Buffer flush on disconnect**: Received data is written to file even if transfer is interrupted
 - **Periodic scan restart**: BLE scan restarts every 5 minutes to fix Samsung BLE stack dropping service data
-- **Periodic GATT server restart**: Every 2 minutes to fix META characteristic not found (skipped during transfers)
+- **Periodic GATT server restart**: Every 10 minutes to fix META characteristic not found (skipped during transfers)
 - **Atomic download guard**: Uses Mutex + Semaphore to prevent concurrent downloads for same fileId
 - **Cancel transfers disconnects GATT**: `cancelTransfer` calls `disconnectDevice()` and `gattServer?.cancelConnection()` to notify receivers
 - **GZIP compression**: Files compressed before encryption, decrypted and decompressed on receipt, cached at `file.compressed` and `file.encrypted`

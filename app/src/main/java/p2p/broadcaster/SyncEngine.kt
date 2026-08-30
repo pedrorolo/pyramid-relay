@@ -233,7 +233,7 @@ class SyncEngine(
             // Periodic GATT server restart to fix META characteristic not found
             launch {
                 while (true) {
-                    kotlinx.coroutines.delay(120_000L)
+                    kotlinx.coroutines.delay(600_000L)
                     if (_downloadingFileIds.value.isNotEmpty() || activeUploadPeers.isNotEmpty()) {
                         EventLog.log("ble", "Periodic GATT server restart skipped (transfer in progress)")
                         continue
@@ -266,6 +266,7 @@ class SyncEngine(
         EventLog.log("sync", "resumeAdvertisingAndScanning called, scope active=${scope.coroutineContext[kotlinx.coroutines.Job]?.isActive}")
         scope.launch {
             try {
+                blePeripheralService.restartGattServer()
                 bleCentralService.startScan()
                 val broadcasts = broadcastDao.getAll()
                 for (b in broadcasts) {
