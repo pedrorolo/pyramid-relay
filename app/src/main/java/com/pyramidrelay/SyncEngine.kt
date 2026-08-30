@@ -44,8 +44,8 @@ class SyncEngine(
 ) {
     companion object {
         private const val TAG = "SyncEngine"
-        private const val DEDUP_TTL_MS = 30_000L
-        private const val PROBE_COOLDOWN_MS = 60_000L
+        private const val DEDUP_TTL_MS = 300_000L
+        private const val PROBE_COOLDOWN_MS = 300_000L
     }
 
     private val scope = testScope ?: CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -430,7 +430,6 @@ class SyncEngine(
             val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
                 EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting relay update"); return false
             }
-            lastProbeAt[deviceAddress] = System.currentTimeMillis()
             // Use the public key from the broadcast entity (originator), not from META
             val hashHex = metaPayload.fileHash.joinToString("") { "%02x".format(it) }
             val tmpFile = fileService.getTmpFile(broadcast.fileId, newVersion)
@@ -446,15 +445,15 @@ class SyncEngine(
             } catch (e: Exception) {
                 EventLog.log("ble", "fetchFile error: ${e.message}"); false
             }
-            if (!transferred) { tmpFile.delete(); EventLog.log("wifi", "Transfer failed for ${broadcast.fileId}"); return false }
+            if (!transferred) { tmpFile.delete(); val dedupKey = "${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); EventLog.log("wifi", "Transfer failed for ${broadcast.fileId}"); return false }
             if (!tmpFile.isFile || tmpFile.length() != metaPayload.fileSize) {
                 EventLog.log("sync", "Downloaded file size mismatch for ${broadcast.fileId}: ${tmpFile.length()}/${metaPayload.fileSize}B")
-                tmpFile.delete(); return false
+                tmpFile.delete(); val dedupKey = "${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); return false
             }
             val encrypted = tmpFile.readBytes()
             val compressed = try {
                 cryptoService.decryptCompressed(encrypted, cryptoService.publicKeyFromBase64(broadcast.publicKey))
-            } catch (e: Exception) { tmpFile.delete(); EventLog.log("sync", "Decrypt failed: ${e.message}"); return false }
+            } catch (e: Exception) { tmpFile.delete(); EventLog.log("sync", "Decrypt failed: ${e.message}"); val dedupKey = "${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); return false }
             tmpFile.writeBytes(compressed)
             val internalFile = fileService.getFile(broadcast.fileId, newVersion)
             try {
@@ -462,13 +461,14 @@ class SyncEngine(
                 tmpFile.delete()
             } catch (e: Exception) {
                 EventLog.log("sync", "Decompression failed for ${broadcast.fileId}: ${e.message}")
-                tmpFile.delete(); internalFile.delete(); return false
+                tmpFile.delete(); internalFile.delete(); val dedupKey = "${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); return false
             }
             val receivedHash = cryptoService.sha256Hex(internalFile.readBytes())
             if (receivedHash != hashHex) {
-                internalFile.delete(); EventLog.log("sync", "Hash mismatch after transfer of ${broadcast.fileId} - discarded")
-                return false
+                internalFile.delete(); EventLog.log("sync", "Hash mismatch after transfer of ${broadcast.fileId} - discarded"); val dedupKey = "${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); return false
             }
+            // Success - write probe cooldown only after successful transfer
+            lastProbeAt["$deviceAddress:${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"] = System.currentTimeMillis()
             broadcastDao.updateVersion(broadcast.fileId, newVersion, Base64.getEncoder().encodeToString(metaPayload.fileHash), "", internalFile.absolutePath, internalFile.length(), encrypted.size.toLong(), System.currentTimeMillis(), metaPayload.fileName.takeIf { it.isNotBlank() } ?: broadcast.fileName)
             subscriptionDao.updateReceived(broadcast.fileId, newVersion, internalFile.absolutePath, newVersion, System.currentTimeMillis(), metaPayload.fileName.takeIf { it.isNotBlank() } ?: broadcast.fileName)
             EventLog.log("sync", "Subscription record updated to v$newVersion for ${broadcast.fileId}")
@@ -528,8 +528,6 @@ class SyncEngine(
             val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
                 EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting fetch"); return@withTimeout
             }
-            val probeKey = "$deviceAddress:${cryptoService.fileIdHash(subscription.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"
-            lastProbeAt[probeKey] = System.currentTimeMillis()
             // Use the public key from the subscription (obtained from QR code/link), not from META
             val hashHex = metaPayload.fileHash.joinToString("") { "%02x".format(it) }
             EventLog.log("gatt", "Meta verified for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
@@ -551,12 +549,16 @@ class SyncEngine(
             if (!transferred) {
                 tmpFile.delete()
                 downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
+                val dedupKey = "${cryptoService.fileIdHash(subscription.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"
+                dedupCache.remove(dedupKey)
                 EventLog.log("sync", "Transfer failed for ${subscription.fileId} (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)"); return@withTimeout
             }
             if (!tmpFile.isFile || tmpFile.length() != metaPayload.fileSize) {
                 EventLog.log("sync", "Downloaded file size mismatch for ${subscription.fileId}: ${tmpFile.length()}/${metaPayload.fileSize}B")
                 tmpFile.delete()
                 downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
+                val dedupKey = "${cryptoService.fileIdHash(subscription.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"
+                dedupCache.remove(dedupKey)
                 EventLog.log("sync", "Transfer failed for ${subscription.fileId} (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)")
                 return@withTimeout
             }
@@ -567,7 +569,7 @@ class SyncEngine(
             EventLog.log("sync", "Persisted original encrypted envelope ${persistedEnvelope.absolutePath} (${persistedEnvelope.length()}B)")
             val compressed = try {
                 cryptoService.decryptCompressed(encrypted, cryptoService.publicKeyFromBase64(subscription.publicKey))
-            } catch (e: Exception) { tmpFile.delete(); EventLog.log("sync", "Decrypt failed: ${e.message}"); return@withTimeout }
+            } catch (e: Exception) { tmpFile.delete(); EventLog.log("sync", "Decrypt failed: ${e.message}"); val dedupKey = "${cryptoService.fileIdHash(subscription.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); return@withTimeout }
             tmpFile.writeBytes(compressed)
             val internalFile = fileService.getFile(subscription.fileId, newVersion)
             try {
@@ -587,8 +589,10 @@ class SyncEngine(
                 EventLog.log("sync", "Hash mismatch after transfer of ${subscription.fileId} - discarded (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)")
                 return@withTimeout
             }
-            // Success - clear retry count
+            // Success - clear retry count and write probe cooldown
             downloadRetryCount.remove(subscription.fileId)
+            val probeKey = "$deviceAddress:${cryptoService.fileIdHash(subscription.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"
+            lastProbeAt[probeKey] = System.currentTimeMillis()
             EventLog.log("sync", "Committed ${internalFile.absolutePath} (${internalFile.length()}B) for subscription v$newVersion")
             val resolvedFileName = metaPayload.fileName.takeIf { it.isNotBlank() } ?: subscription.fileName
             if (metaPayload.fileName.isNotBlank() && metaPayload.fileName != subscription.fileName) {
