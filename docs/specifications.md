@@ -42,7 +42,7 @@ Single-activity (MainActivity) + Jetpack Navigation
          @/ui/qr/QrDisplayDialog.kt, @/ui/qr/QrScanFragment.kt, @/ui/common/
 ```
 
-Single GATT service `APP_SERVICE_UUID` for all filtering: `efe0eeec-0236-41f3-920c-ae56e6f0f221`. GATT characteristics stay 128-bit - they never appear in the advertisement.
+Single GATT service `APP_SERVICE_UUID` for all filtering. The UUID must be **16-bit** (`0000f47b-0000-1000-8000-00805f9b34fb`, alias `0xF47B`): a 128-bit UUID in a legacy 31B advertisement leaves only 10B for payload (see §8). GATT characteristics stay 128-bit - they never appear in the advertisement.
 
 ## 4. Data Model
 
