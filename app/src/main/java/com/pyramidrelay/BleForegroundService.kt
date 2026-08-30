@@ -1,9 +1,10 @@
 package com.pyramidrelay
 
+import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.net.wifi.WifiManager
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -16,17 +17,20 @@ class BleForegroundService : Service() {
     companion object {
         private const val TAG = "BleFgService"
         private const val NOTIFICATION_ID = 1
-        private const val CHANNEL_ID = "ble_foreground"
-        private const val NOTIFICATION_CHECK_INTERVAL_MS = 5_000L
+        private const val NOTIFICATION_CHECK_INTERVAL_MS = 30_000L
     }
 
     private var syncEngine: SyncEngine? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private val notificationService by lazy { NotificationService(this) }
+    private val notificationManager by lazy { getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager }
     private val handler = Handler(Looper.getMainLooper())
     private val notificationChecker = object : Runnable {
         override fun run() {
-            rePostNotification()
+            if (!isNotificationActive()) {
+                EventLog.log("ble", "Persistent notification was cleared — re-posting")
+                rePostNotification()
+            }
             handler.postDelayed(this, NOTIFICATION_CHECK_INTERVAL_MS)
         }
     }
@@ -62,6 +66,11 @@ class BleForegroundService : Service() {
         syncEngine?.stop()
         super.onDestroy()
         Log.d(TAG, "BLE foreground service stopped")
+    }
+
+    private fun isNotificationActive(): Boolean {
+        val notifications = notificationManager.activeNotifications
+        return notifications.any { it.id == NOTIFICATION_ID }
     }
 
     private fun rePostNotification() {
