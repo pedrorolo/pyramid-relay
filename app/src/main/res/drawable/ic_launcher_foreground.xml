@@ -7,9 +7,9 @@
     <path android:pathData="M54,20 L40,46 L68,46 Z" android:strokeWidth="1.0" android:strokeColor="#FF5A4218" android:fillColor="#FFF0D060" />
 
     <!-- Retro text-editor file icon -->
-    <path android:pathData="M49,27 L57,27 L61,31 L61,40 L49,40 Z" android:fillColor="#FFFDF3D8" android:strokeWidth="0.55" android:strokeColor="#FF5A4218" />
-    <path android:pathData="M57,27 L57,31 L61,31 Z" android:fillColor="#FFD9B96F" />
-    <path android:pathData="M51,33 L59,33 M51,35.5 L58,35.5 M51,38 L56,38" android:strokeWidth="0.75" android:strokeColor="#FF9A5B22" />
+    <path android:pathData="M49,26 L57,26 L61,30 L61,43 L49,43 Z" android:fillColor="#FFFDF3D8" android:strokeWidth="0.55" android:strokeColor="#FF5A4218" />
+    <path android:pathData="M57,26 L57,30 L61,30 Z" android:fillColor="#FFD9B96F" />
+    <path android:pathData="M51,33 L59,33 M51,37 L58,37 M51,41 L56,41" android:strokeWidth="0.75" android:strokeColor="#FF9A5B22" />
 
     <!-- 3D body begins exactly at the capstone triangle base -->
     <!-- Narrow engraved right face -->
