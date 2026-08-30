@@ -270,9 +270,7 @@ fun BroadcastsScreen(
                                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                                         )
                                     }
-                                } else if (isAdvertising) {
-                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
-                                }
+                                 }
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
                                     IconButton(onClick = {
