@@ -110,6 +110,7 @@ class BleCentralService(private val context: Context) {
         // Samsung BLE connections frequently fail on the first attempt (status !=
         // GATT_SUCCESS). Retry a few times before giving up.
         var lastStatus = -1
+        val fibDelays = listOf(1500L, 1500L, 3000L, 4500L, 7500L) // Fibonacci-based: F(n) * 1500ms
         repeat(5) { attempt ->
             val attemptNo = attempt + 1
             val deferred = CompletableDeferred<BleMetaPayload?>()
@@ -172,7 +173,7 @@ class BleCentralService(private val context: Context) {
             EventLog.log("ble", "GATT connect to ${deviceAddress.takeLast(5)} for meta read (attempt $attemptNo)")
             val result = try { withTimeout(90_000L) { deferred.await() } } catch (e: Exception) { Log.e(TAG, "Timeout reading meta from $deviceAddress", e); EventLog.log("ble", "Meta read TIMED OUT from ${deviceAddress.takeLast(5)} (attempt $attemptNo)"); null }
             if (result != null) return result
-            kotlinx.coroutines.delay(1_500)
+            if (attempt < fibDelays.size) kotlinx.coroutines.delay(fibDelays[attempt])
         }
         EventLog.log("ble", "Meta read FAILED after 5 attempts for ${deviceAddress.takeLast(5)} (last status=$lastStatus)")
         return null
@@ -289,8 +290,8 @@ class BleCentralService(private val context: Context) {
         device.connectGatt(context, false, gattCallback, android.bluetooth.BluetoothDevice.TRANSPORT_LE).also { gattRef = it; activeGattConnections[deviceAddress] = it }
             ?: run { EventLog.log("ble", "fetchFile: connectGatt returned null for ${deviceAddress.takeLast(5)}"); return false }
         EventLog.log("ble", "GATT fetchFile v$version ($expectedSize B) from ${deviceAddress.takeLast(5)}")
-        // 30s handshake + conservative 20 KB/s transfer budget
-        val timeoutMs = 30_000L + expectedSize * 1000L / 20_000L
+        // 60s handshake + worst-case 5 KB/s transfer budget (resilient to poor connections)
+        val timeoutMs = 60_000L + expectedSize * 1000L / 5_000L
         val ok = try { withTimeout(timeoutMs) { deferred.await() } } catch (e: Exception) {
             EventLog.log("ble", "fetchFile TIMED OUT after ${timeoutMs / 1000}s (${buffer.size()}/$expectedSize B) from ${deviceAddress.takeLast(5)}")
             false

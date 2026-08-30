@@ -521,7 +521,7 @@ class SyncEngine(
             EventLog.log("sync", "Download started for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion from ${deviceAddress.takeLast(5)}")
         var downloadResult = false
         try {
-            withTimeout(600_000L) {
+            withTimeout(3_600_000L) {
             val fileIdHash = cryptoService.fileIdHash(subscription.fileId)
             val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
                 EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting fetch"); return@withTimeout
