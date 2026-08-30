@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" fill="#fbe7a8"/>
+  <g transform="translate(96 80) scale(2)">
+    <!-- Front face (golden) -->
+    <path
+      d="M14,4 L4,19 L20,19 Z"
+      fill="#f5d879"
+      stroke="#694719"
+      stroke-width="1"
+      stroke-linejoin="round"/>
+    <!-- 3D lateral/side face (darker brown) -->
+    <path
+      d="M14,4 L20,19 L24,15 Z"
+      fill="#d79a3c"
+      stroke="#694719"
+      stroke-width="1"
+      stroke-linejoin="round"/>
+  </g>
+</svg>

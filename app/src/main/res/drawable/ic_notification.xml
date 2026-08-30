@@ -4,10 +4,18 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
+    <!-- Front face (golden) -->
     <path
-        android:fillColor="@android:color/transparent"
-        android:pathData="M12,3 L4,19 L20,19 Z"
-        android:strokeColor="#FFFFFFFF"
+        android:fillColor="#FFE3A83E"
+        android:pathData="M14,4 L4,19 L20,19 Z"
+        android:strokeColor="#FF5A4218"
         android:strokeLineJoin="round"
-        android:strokeWidth="2" />
+        android:strokeWidth="1" />
+    <!-- 3D lateral/side face (darker brown) -->
+    <path
+        android:fillColor="#FFB87928"
+        android:pathData="M14,4 L20,19 L24,15 Z"
+        android:strokeColor="#FF5A4218"
+        android:strokeLineJoin="round"
+        android:strokeWidth="1" />
 </vector>
