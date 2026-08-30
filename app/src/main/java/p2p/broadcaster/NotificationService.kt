@@ -38,12 +38,14 @@ class NotificationService(private val context: Context) {
         val pendingIntent = PendingIntent.getActivity(
             context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        return Notification.Builder(context, FG_CHANNEL_ID)
+        return androidx.core.app.NotificationCompat.Builder(context, FG_CHANNEL_ID)
             .setContentTitle("P2P Broadcaster — Relaying files")
             .setContentText("Keep this notification to relay files to nearby devices")
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setSilent(true)
+            .setCategory(androidx.core.app.NotificationCompat.CATEGORY_SERVICE)
             .build()
     }
 
