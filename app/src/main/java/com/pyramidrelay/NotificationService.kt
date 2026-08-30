@@ -27,7 +27,10 @@ class NotificationService(private val context: Context) {
             enableVibration(true)
         }
         notificationManager.createNotificationChannel(channel)
-        val fgChannel = NotificationChannel(FG_CHANNEL_ID, "BLE Background", NotificationManager.IMPORTANCE_LOW)
+        val fgChannel = NotificationChannel(FG_CHANNEL_ID, "BLE Background", NotificationManager.IMPORTANCE_LOW).apply {
+            description = "Keeps the P2P relay running in the background"
+            setShowBadge(false)
+        }
         notificationManager.createNotificationChannel(fgChannel)
     }
 
@@ -45,7 +48,9 @@ class NotificationService(private val context: Context) {
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setSilent(true)
+            .setVisibility(androidx.core.app.NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(androidx.core.app.NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
             .build()
     }
 
