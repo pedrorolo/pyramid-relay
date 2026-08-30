@@ -361,7 +361,7 @@ class BlePeripheralService(private val context: Context, private val transferSem
             EventLog.log("ble", "Rotation skipped (${advertisingFiles.size} file(s) — static advertising)")
             return
         }
-        val intervalMs = 30_000L
+        val intervalMs = 10_000L
         rotationRunning = true
         EventLog.log("ble", "Rotation thread starting (${advertisingFiles.size} files, ${intervalMs / 1000}s interval)")
         rotationThread = Thread({
