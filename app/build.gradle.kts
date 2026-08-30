@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "p2p.broadcaster"
+    namespace = "com.pyramidrelay"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "p2p.broadcaster"
+        applicationId = "com.pyramidrelay"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
