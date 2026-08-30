@@ -103,7 +103,8 @@ class BlePeripheralService(private val context: Context, private val transferSem
                     EventLog.log("ble", "Broadcaster: central $addr DISCONNECTED (status=$status)")
                     device?.address?.let { addr ->
                         val fId = streamToFileId.remove(addr)
-                        selectedFileByCentral.remove(addr)
+                        // Don't clear selectedFileByCentral here — the central may reconnect
+                // for fetchFile and needs the selection to persist across connections.
                         if (fId != null) {
                             _activeStreamingFileIds.value = _activeStreamingFileIds.value - fId
                             _streamingProgress.value = _streamingProgress.value - fId

@@ -15,6 +15,7 @@ import android.os.ParcelUuid
 import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -257,9 +258,21 @@ class BleCentralService(private val context: Context) {
                 if (submit != BluetoothGatt.GATT_SUCCESS) { EventLog.log("ble", "fetchFile: PULL write failed to submit ($submit)"); deferred.complete(false) }
             }
             override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
-                if (characteristic.uuid == STREAM_UUID && status != BluetoothGatt.GATT_SUCCESS) {
-                    EventLog.log("ble", "fetchFile: PULL write rejected (status=$status)")
-                    deferred.complete(false)
+                if (characteristic.uuid == STREAM_UUID) {
+                    if (status != BluetoothGatt.GATT_SUCCESS) {
+                        EventLog.log("ble", "fetchFile: PULL write rejected (status=$status)")
+                        deferred.complete(false)
+                    } else {
+                        // Start first-chunk timeout: if no data arrives in 15s, abort
+                        scope.launch {
+                            delay(15_000L)
+                            if (buffer.size() == 0 && !deferred.isCompleted) {
+                                EventLog.log("ble", "fetchFile: first chunk timeout (15s) — aborting")
+                                deferred.complete(false)
+                                gatt.disconnect()
+                            }
+                        }
+                    }
                 }
             }
             @Deprecated("Deprecated in Java")

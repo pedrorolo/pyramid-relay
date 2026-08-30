@@ -336,11 +336,12 @@ class SyncEngine(
         dedupCache[dedupKey]?.let { if (now - it < DEDUP_TTL_MS) { return false } }
         dedupCache[dedupKey] = now
 
-        // Per-device probe cooldown: once we have learned a peer's file/version info,
-        // don't connect to it again for PROBE_COOLDOWN_MS.
-        lastProbeAt[deviceAddress]?.let {
+        // Per-device+file probe cooldown: once we have learned a peer's file/version
+        // info, don't probe that device again for the same file for PROBE_COOLDOWN_MS.
+        val probeKey = "$deviceAddress:$dedupKey"
+        lastProbeAt[probeKey]?.let {
             if (now - it < PROBE_COOLDOWN_MS) {
-                EventLog.log("scan", "Probe cooldown: ${deviceAddress.takeLast(5)} probed ${"%.1f".format((now - it) / 1000.0)}s ago (< ${PROBE_COOLDOWN_MS / 60000}min) - skipping")
+                EventLog.log("scan", "Probe cooldown: ${deviceAddress.takeLast(5)} probed for file ${dedupKey.take(12)}... ${"%.1f".format((now - it) / 1000.0)}s ago (< ${PROBE_COOLDOWN_MS / 60000}min) - skipping")
                 return false
             }
         }
@@ -527,7 +528,8 @@ class SyncEngine(
             val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
                 EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting fetch"); return@withTimeout
             }
-            lastProbeAt[deviceAddress] = System.currentTimeMillis()
+            val probeKey = "$deviceAddress:${cryptoService.fileIdHash(subscription.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"
+            lastProbeAt[probeKey] = System.currentTimeMillis()
             // Use the public key from the subscription (obtained from QR code/link), not from META
             val hashHex = metaPayload.fileHash.joinToString("") { "%02x".format(it) }
             EventLog.log("gatt", "Meta verified for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
