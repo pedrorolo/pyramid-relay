@@ -119,29 +119,6 @@ class ServiceTest {
     }
 
     @Test
-    fun `WifiDirectService stopServer is safe when not started`() {
-        val context = ApplicationProvider.getApplicationContext<Application>()
-        val service = WifiDirectService(context)
-        service.stopServer()
-    }
-
-    @Test
-    fun `WifiDirectService destroy is safe`() {
-        val context = ApplicationProvider.getApplicationContext<Application>()
-        val service = WifiDirectService(context)
-        service.destroy()
-    }
-
-    @Test
-    fun `WifiDirectService onTransferReceived is settable`() {
-        val context = ApplicationProvider.getApplicationContext<Application>()
-        val service = WifiDirectService(context)
-        var received = false
-        service.onTransferReceived = { _, _, _, _ -> received = true }
-        assertNotNull(service.onTransferReceived)
-    }
-
-    @Test
     fun `FileService getStoreDir works with Robolectric`() {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val service = FileService(context)

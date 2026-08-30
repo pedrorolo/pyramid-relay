@@ -53,7 +53,6 @@ class FinalCoverageTest {
         val fileService = mockk<FileService>(relaxed = true)
         val bleCentralService = mockk<BleCentralService>(relaxed = true)
         val blePeripheralService = mockk<BlePeripheralService>(relaxed = true)
-        val wifiDirectService = mockk<WifiDirectService>(relaxed = true)
         val notificationService = mockk<NotificationService>(relaxed = true)
         val context = mockk<Context>(relaxed = true)
         every { broadcastDao.changeFlow } returns MutableStateFlow(0L)
@@ -63,7 +62,7 @@ class FinalCoverageTest {
         val engine = SyncEngine(
             context,
             broadcastDao, subscriptionDao, cryptoService, fileService,
-            bleCentralService, blePeripheralService, wifiDirectService, notificationService
+            bleCentralService, blePeripheralService, notificationService
         )
 
         val fileId = UUID.randomUUID().toString()
@@ -95,7 +94,6 @@ class FinalCoverageTest {
         val fileService = mockk<FileService>(relaxed = true)
         val bleCentralService = mockk<BleCentralService>(relaxed = true)
         val blePeripheralService = mockk<BlePeripheralService>(relaxed = true)
-        val wifiDirectService = mockk<WifiDirectService>(relaxed = true)
         val notificationService = mockk<NotificationService>(relaxed = true)
         val context = mockk<Context>(relaxed = true)
         every { broadcastDao.changeFlow } returns MutableStateFlow(0L)
@@ -105,7 +103,7 @@ class FinalCoverageTest {
         val engine = SyncEngine(
             context,
             broadcastDao, subscriptionDao, cryptoService, fileService,
-            bleCentralService, blePeripheralService, wifiDirectService, notificationService
+            bleCentralService, blePeripheralService, notificationService
         )
 
         val fileId = UUID.randomUUID().toString()
@@ -136,14 +134,13 @@ class FinalCoverageTest {
         val fileService = mockk<FileService>(relaxed = true)
         val bleCentralService = mockk<BleCentralService>(relaxed = true)
         val blePeripheralService = mockk<BlePeripheralService>(relaxed = true)
-        val wifiDirectService = mockk<WifiDirectService>(relaxed = true)
         val notificationService = mockk<NotificationService>(relaxed = true)
         val context = mockk<Context>(relaxed = true)
 
         val engine = SyncEngine(
             context,
             broadcastDao, subscriptionDao, cryptoService, fileService,
-            bleCentralService, blePeripheralService, wifiDirectService, notificationService
+            bleCentralService, blePeripheralService, notificationService
         )
 
         val fileId = UUID.randomUUID().toString()

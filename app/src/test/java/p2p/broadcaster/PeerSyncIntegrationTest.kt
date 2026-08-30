@@ -64,8 +64,8 @@ class PeerSyncIntegrationTest {
         notifierB = mockk(relaxed = true)
         val contextA = mockk<Context>(relaxed = true)
         val contextB = mockk<Context>(relaxed = true)
-        engineA = SyncEngine(contextA, broadcastDaoA, subscriptionDaoA, cryptoA, fileServiceA, bleCentralA, blePeripheralA, mockk(relaxed = true), mockk(relaxed = true))
-        engineB = SyncEngine(contextB, broadcastDaoB, subscriptionDaoB, cryptoB, fileServiceB, bleCentralB, blePeripheralB, mockk(relaxed = true), notifierB)
+        engineA = SyncEngine(contextA, broadcastDaoA, subscriptionDaoA, cryptoA, fileServiceA, bleCentralA, blePeripheralA, mockk(relaxed = true))
+        engineB = SyncEngine(contextB, broadcastDaoB, subscriptionDaoB, cryptoB, fileServiceB, bleCentralB, blePeripheralB, notifierB)
     }
 
     @After

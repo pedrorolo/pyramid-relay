@@ -54,34 +54,6 @@ class ServiceCoverageTest {
     }
 
     @Test
-    fun `WifiDirectService intToBytes and longToBytes`() {
-        val context = ApplicationProvider.getApplicationContext<Application>()
-        val service = WifiDirectService(context)
-        
-        val intMethod = WifiDirectService::class.java.getDeclaredMethod("intToBytes", Int::class.javaPrimitiveType)
-        intMethod.isAccessible = true
-        
-        val result1 = intMethod.invoke(service, 0x01020304) as ByteArray
-        assertArrayEquals(byteArrayOf(0x01, 0x02, 0x03, 0x04), result1)
-        
-        val longMethod = WifiDirectService::class.java.getDeclaredMethod("longToBytes", Long::class.javaPrimitiveType)
-        longMethod.isAccessible = true
-        
-        val result2 = longMethod.invoke(service, 0x0102030405060708L) as ByteArray
-        assertArrayEquals(byteArrayOf(0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08), result2)
-    }
-
-    @Test
-    fun `WifiDirectService peer connect and removeGroup are safe without P2P`() {
-        val context = ApplicationProvider.getApplicationContext<Application>()
-        val service = WifiDirectService(context)
-        service.initialize()
-        val result = service.ensureConnectedToDevice(byteArrayOf(1, 2, 3, 4))
-        assertNull(result)
-        service.removeGroup()
-    }
-
-    @Test
     fun `BlePeripheralService onCharacteristicReadRequest for META`() {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val service = BlePeripheralService(context)

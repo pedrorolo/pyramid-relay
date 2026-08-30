@@ -25,7 +25,6 @@ class SyncEngineTest {
     private lateinit var fileService: FileService
     private lateinit var bleCentralService: BleCentralService
     private lateinit var blePeripheralService: BlePeripheralService
-    private lateinit var wifiDirectService: WifiDirectService
     private lateinit var notificationService: NotificationService
     private lateinit var engine: SyncEngine
     private val testDispatcher = StandardTestDispatcher()
@@ -41,13 +40,12 @@ class SyncEngineTest {
         fileService = mockk(relaxed = true)
         bleCentralService = mockk(relaxed = true)
         blePeripheralService = mockk(relaxed = true)
-        wifiDirectService = mockk(relaxed = true)
         notificationService = mockk(relaxed = true)
         every { broadcastDao.changeFlow } returns MutableStateFlow(0L)
         every { subscriptionDao.changeFlow } returns MutableStateFlow(0L)
         coEvery { broadcastDao.getById(any()) } returns null
         engine = SyncEngine(context, broadcastDao, subscriptionDao, cryptoService, fileService,
-            bleCentralService, blePeripheralService, wifiDirectService, notificationService, kotlinx.coroutines.sync.Semaphore(1), testScope)
+            bleCentralService, blePeripheralService, notificationService, kotlinx.coroutines.sync.Semaphore(1), testScope)
     }
 
     @After

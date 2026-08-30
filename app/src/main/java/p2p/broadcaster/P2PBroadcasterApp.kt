@@ -19,8 +19,6 @@ class P2PBroadcasterApp : Application() {
         private set
     lateinit var blePeripheralService: BlePeripheralService
         private set
-    lateinit var wifiDirectService: WifiDirectService
-        private set
     lateinit var syncEngine: SyncEngine
         private set
 
@@ -35,10 +33,9 @@ class P2PBroadcasterApp : Application() {
         bleCentralService = BleCentralService(this)
         val transferSemaphore = kotlinx.coroutines.sync.Semaphore(1) // Only one transfer at a time
         blePeripheralService = BlePeripheralService(this, transferSemaphore)
-        wifiDirectService = WifiDirectService(this)
         syncEngine = SyncEngine(
             this, broadcastDao, subscriptionDao, cryptoService, fileService,
-            bleCentralService, blePeripheralService, wifiDirectService, notificationService, transferSemaphore
+            bleCentralService, blePeripheralService, notificationService, transferSemaphore
         )
         syncEngine.start()
     }

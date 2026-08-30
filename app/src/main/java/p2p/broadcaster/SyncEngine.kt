@@ -38,7 +38,6 @@ class SyncEngine(
     private val fileService: FileService,
     private val bleCentralService: BleCentralService,
     private val blePeripheralService: BlePeripheralService,
-    private val wifiDirectService: WifiDirectService,
     private val notificationService: NotificationService,
     private val transferSemaphore: kotlinx.coroutines.sync.Semaphore = kotlinx.coroutines.sync.Semaphore(1),
     testScope: CoroutineScope? = null
@@ -155,11 +154,6 @@ class SyncEngine(
             bleCentralService.onDeviceDiscovered = { address, serviceData ->
                 scope.launch { handleDiscoveredDevice(address, serviceData) }
             }
-            wifiDirectService.onRequestFile = { fileId, version, output ->
-                val file = fileService.getFile(fileId, version)
-                if (!file.exists()) throw IllegalStateException("Requested file not available: $fileId v$version")
-                file.inputStream().use { it.copyTo(output) }
-            }
             blePeripheralService.isPeerTransferAllowed = { address -> !activeDownloadPeers.contains(address) }
             blePeripheralService.onUploadStart = { address -> activeUploadPeers.add(address) }
             blePeripheralService.onUploadEnd = { address -> activeUploadPeers.remove(address) }
@@ -252,8 +246,6 @@ class SyncEngine(
                     }
                 }
             }
-            wifiDirectService.initialize()
-            try { wifiDirectService.startServer() } catch (e: Exception) { Log.e(TAG, "wifi startServer failed", e); EventLog.log("wifi", "startServer failed: ${e.message}") }
         }
     }
 
@@ -325,7 +317,6 @@ class SyncEngine(
         }
         blePeripheralService.startAdvertising(broadcast.fileId, serviceData)
         advertisedFiles.add(broadcast.fileId)
-        wifiDirectService.setDeviceTag(cryptoService.keyId(broadcast.publicKey))
         EventLog.log("adv", "Advertising \"${broadcast.fileName}\" v${broadcast.version} (${broadcast.fileSize}B, compressed ${broadcast.compressedSize}B)")
     }
 

@@ -21,7 +21,7 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 
 - **Single-activity** Compose app with bottom nav (Broadcasts | Subscriptions | Log)
 - **BLE GATT** is the primary transfer mechanism (not Wi-Fi Direct — dropped)
-- **128-bit service UUID**: `0000f47b-0000-1000-8000-00805f9b34fb` — fits in 31B legacy advertising packet (21B on wire)
+- **16-bit service UUID**: `00006d38-0000-1000-8000-00805f9b34fb` — fits in 31B legacy advertising packet (21B on wire). Derived from `6d388575-46d6-4e84-9384-b14fb2006b20` via uuidgen.
 - **Notification-based streaming**: Peripheral pushes chunks via `notifyCharacteristicChanged` (512B per chunk, 10ms sleep between chunks)
 - **Samsung BLE quirk**: The BLE stack silently drops service data from scan results. Fixed with periodic scan restart (every 5 minutes).
 - **Encrypted payloads**: Files are compressed first, then encrypted with a hybrid RSA/AES-GCM envelope before transfer.
@@ -43,7 +43,7 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 - **Max retries**: 3 attempts per file (prevents infinite retry loops)
 - **Rotation interval**: 10 seconds (paused during active transfers)
 - **Download timeout**: 10 minutes per file
-- **BLE timeouts**: 30s base for meta read and fetchFile operations
+- **BLE timeouts**: 90s per meta read attempt; fetchFile timeout is 30s + size-based (expectedSize * 1000 / 20000 ms)
 - **Payload encryption**: AES-256-GCM encrypts compressed bytes; the AES key is wrapped with the originator's RSA private key and recovered using the QR-provided RSA public key.
 - **No signatures**: Authenticated encryption replaces the former signature field and verification flow.
 - **Database reset**: Schema changes drop and recreate the database; backward-compatible migrations are not required.
@@ -62,6 +62,8 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 - **BroadcastsViewModel**: Manages broadcasts (Role.ORIGINATOR only shown in UI)
 - **SubscriptionsViewModel**: Manages subscriptions; downloads trigger relay (Role.RELAY)
 - **CryptoService**: Generates RSA keys and handles the hybrid encrypted payload envelope.
+- **NotificationService**: Shows foreground notification for relaying and update notifications for file transfers.
+- **BootReceiver**: Restarts the BLE foreground service on device boot.
 
 ## Progress Tracking
 
@@ -103,6 +105,7 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 - **Cancel transfers disconnects GATT**: `cancelTransfer` calls `disconnectDevice()` and `gattServer?.cancelConnection()` to notify receivers
 - **GZIP compression**: Files compressed before encryption, decrypted and decompressed on receipt, cached at `file.compressed` and `file.encrypted`
 - **Meta read retries**: 5 attempts (Samsung BLE connections frequently fail on first attempt)
+- **Meta read timeout**: 90s per attempt
 - **Delete cancels transfers**: `deleteBroadcast` and `deleteSubscription` call `cancelTransfer` first
 
 ## EventLog
@@ -123,4 +126,11 @@ Key log prefixes:
 ## Test Devices
 
 - `R52X104ZSRD` — Samsung device (primary test device)
-- `R5CY91WAZGB` — Samsung device (secondary test device)
+- `R5CY91WAZGB` — Samsung device (secondary test device, may USB-disconnect during ADB)
+
+## Opencode Skills
+
+Project-specific skills are defined in `.opencode/skills/`:
+
+- **run-tests**: Run all unit tests via `./gradlew testDebugUnitTest`
+- **deploy**: Build debug APK and install on all connected Android devices

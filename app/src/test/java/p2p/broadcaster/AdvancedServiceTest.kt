@@ -54,21 +54,6 @@ class AdvancedServiceTest {
     }
 
     @Test
-    fun `WifiDirectService startServer and stopServer work`() {
-        val context = ApplicationProvider.getApplicationContext<Application>()
-        val service = WifiDirectService(context)
-        service.startServer()
-        service.stopServer()
-    }
-
-    @Test
-    fun `WifiDirectService removeGroup works`() {
-        val context = ApplicationProvider.getApplicationContext<Application>()
-        val service = WifiDirectService(context)
-        service.removeGroup()
-    }
-
-    @Test
     fun `BlePeripheralService onCharacteristicReadRequest handles META_UUID`() {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val service = BlePeripheralService(context)
