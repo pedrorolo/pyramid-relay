@@ -21,6 +21,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 
 class BleCentralService(private val context: Context) {
@@ -38,6 +39,7 @@ class BleCentralService(private val context: Context) {
     private var scanCallback: ScanCallback? = null
     private var lastNoServiceDataLogAt = 0L
     private val activeGattConnections = java.util.concurrent.ConcurrentHashMap<String, BluetoothGatt>()
+    private val metaLocks = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
     var onDeviceDiscovered: ((deviceAddress: String, serviceData: ByteArray) -> Unit)? = null
 
     @SuppressLint("MissingPermission")
@@ -93,6 +95,13 @@ class BleCentralService(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     suspend fun readMeta(deviceAddress: String, fileIdHash: ByteArray? = null): BleMetaPayload? {
+        return metaLocks.getOrPut(deviceAddress) { kotlinx.coroutines.sync.Mutex() }.withLock {
+            readMetaLocked(deviceAddress, fileIdHash)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun readMetaLocked(deviceAddress: String, fileIdHash: ByteArray? = null): BleMetaPayload? {
         val device = bluetoothManager.adapter?.getRemoteDevice(deviceAddress) ?: run {
             EventLog.log("ble", "readMeta: adapter or device unavailable for ${deviceAddress.takeLast(5)}")
             return null
@@ -155,11 +164,15 @@ class BleCentralService(private val context: Context) {
                     gatt.disconnect(); gatt.close()
                 }
             }
-            device.connectGatt(context, false, gattCallback, android.bluetooth.BluetoothDevice.TRANSPORT_LE)
+            val gatt = device.connectGatt(context, false, gattCallback, android.bluetooth.BluetoothDevice.TRANSPORT_LE)
+            if (gatt == null) {
+                EventLog.log("ble", "GATT connect returned null for ${deviceAddress.takeLast(5)} (attempt $attemptNo)")
+                deferred.complete(null)
+            }
             EventLog.log("ble", "GATT connect to ${deviceAddress.takeLast(5)} for meta read (attempt $attemptNo)")
             val result = try { withTimeout(90_000L) { deferred.await() } } catch (e: Exception) { Log.e(TAG, "Timeout reading meta from $deviceAddress", e); EventLog.log("ble", "Meta read TIMED OUT from ${deviceAddress.takeLast(5)} (attempt $attemptNo)"); null }
             if (result != null) return result
-            kotlinx.coroutines.delay(300)
+            kotlinx.coroutines.delay(1_500)
         }
         EventLog.log("ble", "Meta read FAILED after 5 attempts for ${deviceAddress.takeLast(5)} (last status=$lastStatus)")
         return null
