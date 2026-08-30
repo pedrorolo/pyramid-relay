@@ -4,7 +4,7 @@
     <path android:pathData="M54,18 L54,9 M46,22 L34,12 M62,22 L74,12 M42,28 L27,18 M66,28 L81,18 M54,33 L25,43 M54,33 L83,43" android:strokeWidth="0.35" android:strokeColor="#E0FFF8D6" />
 
     <!-- Apex triangle -->
-    <path android:pathData="M54,22 L43,43 L65,43 Z" android:strokeWidth="1.0" android:strokeColor="#FF5A4218" android:fillColor="#FFF0D060" />
+    <path android:pathData="M54,20 L40,46 L68,46 Z" android:strokeWidth="1.0" android:strokeColor="#FF5A4218" android:fillColor="#FFF0D060" />
 
     <!-- Retro text-editor file icon -->
     <path android:pathData="M49,27 L57,27 L61,31 L61,40 L49,40 Z" android:fillColor="#FFFDF3D8" android:strokeWidth="0.55" android:strokeColor="#FF5A4218" />
@@ -13,13 +13,13 @@
 
     <!-- 3D body begins exactly at the capstone triangle base -->
     <!-- Narrow engraved right face -->
-    <path android:pathData="M65,43 L96,82 L88,87 Z" android:fillColor="#FFB87928" android:strokeWidth="0.7" android:strokeColor="#FF5A4218" />
+    <path android:pathData="M68,46 L96,82 L90,88 Z" android:fillColor="#FFB87928" android:strokeWidth="0.7" android:strokeColor="#FF5A4218" />
     <path android:pathData="M58,51 L77,82 M60,53 L79,81 M62,56 L80,79 M64,59 L81,77 M66,62 L82,75 M68,65 L82,73" android:strokeWidth="0.45" android:strokeColor="#905A3518" />
 
     <!-- Broad engraved pyramid face -->
-    <path android:pathData="M43,43 L65,43 L88,87 L20,87 Z" android:fillColor="#FFE3A83E" android:strokeWidth="0.8" android:strokeColor="#FF5A4218" />
+    <path android:pathData="M40,46 L68,46 L90,88 L18,88 Z" android:fillColor="#FFE3A83E" android:strokeWidth="0.8" android:strokeColor="#FF5A4218" />
     <!-- Dense horizontal engraving -->
     <path android:pathData="M49,50 L59,50 M45,55 L63,55 M41,60 L67,60 M37,65 L71,65 M33,70 L72,70 M29,75 L73,75 M24,80 L74,80 M19,85 L75,85" android:strokeWidth="0.45" android:strokeColor="#704B3518" />
     <path android:pathData="M47,52 L60,52 M43,57 L65,57 M39,62 L69,62 M35,67 L71,67 M31,72 L72,72 M27,77 L73,77 M22,82 L74,82" android:strokeWidth="0.25" android:strokeColor="#805A3518" />
-    <path android:pathData="M20,87 L88,87" android:strokeWidth="0.9" android:strokeColor="#FF5A4218" />
+    <path android:pathData="M18,88 L90,88" android:strokeWidth="0.9" android:strokeColor="#FF5A4218" />
 </vector>

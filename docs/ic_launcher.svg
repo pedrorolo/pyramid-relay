@@ -5,7 +5,7 @@
   <linearGradient id="side" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#d79a3c"/><stop offset="1" stop-color="#a85d1d"/></linearGradient>
   <mask id="rayMask">
     <rect width="512" height="512" fill="white"/>
-    <polygon points="256,72 204,205 308,205" fill="black"/>
+    <polygon points="256,95 190,225 322,225" fill="black"/>
     <circle cx="256" cy="158" r="70" fill="black"/>
   </mask>
 </defs>
@@ -17,17 +17,17 @@
 </g>
 
 <!-- Apex triangle -->
-<polygon points="256,105 204,205 308,205" fill="#fff5d7" fill-opacity=".35" stroke="#694719" stroke-width="5"/>
+<polygon points="256,95 190,225 322,225" fill="#fff5d7" fill-opacity=".35" stroke="#694719" stroke-width="5"/>
 <!-- Retro file icon -->
 <polygon points="232,130 268,130 288,150 288,190 232,190" fill="#fffdf0" stroke="#694719" stroke-width="3"/>
 <polygon points="268,130 268,150 288,150" fill="#d9b56e" stroke="#694719" stroke-width="2"/>
 <g stroke="#b96924" stroke-width="5" stroke-linecap="round"><path d="M242 160h36"/><path d="M242 174h28"/><path d="M242 187h20"/></g>
 <!-- 3D body starts at the exact base of the capstone triangle -->
 <!-- 3D right side, behind front face -->
-<polygon points="308,205 440,410 425,430" fill="url(#side)" stroke="#694719" stroke-width="4"/>
+<polygon points="322,225 440,410 425,430" fill="url(#side)" stroke="#694719" stroke-width="4"/>
 <g stroke="#744722" stroke-width="2" opacity=".7"><path d="M274 250l91 157"/><path d="M283 256l92 151"/><path d="M292 270l87 137"/><path d="M302 282l82 125"/><path d="M312 298l75 109"/><path d="M322 314l65 93"/><path d="M332 330l55 77"/></g>
 <!-- Broad front face -->
-<polygon points="204,205 308,205 425,430 87,430" fill="url(#face)" stroke="#694719" stroke-width="5" stroke-linejoin="round"/>
+<polygon points="190,225 322,225 425,430 87,430" fill="url(#face)" stroke="#694719" stroke-width="5" stroke-linejoin="round"/>
 <!-- Horizontal engraved hatch lines -->
 <g stroke="#71491f" stroke-width="2" stroke-linecap="round" opacity=".65">
 <path d="M232 240h48"/><path d="M220 258h72"/><path d="M207 276h98"/><path d="M193 294h126"/><path d="M179 312h154"/><path d="M165 330h182"/><path d="M151 348h210"/><path d="M136 366h228"/><path d="M121 384h243"/><path d="M106 402h248"/><path d="M89 420h259"/>
