@@ -41,7 +41,7 @@ class NotificationService(private val context: Context) {
         return Notification.Builder(context, FG_CHANNEL_ID)
             .setContentTitle("P2P Broadcaster — Relaying files")
             .setContentText("Keep this notification to relay files to nearby devices")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
@@ -63,7 +63,7 @@ class NotificationService(private val context: Context) {
         Log.d(TAG, "showUpdateNotification: fileName=$fileName, oldVersion=$oldVersion, newVersion=$newVersion, text=$notificationText")
         val notification = NotificationCompatBuilder(context).build(
             CHANNEL_ID, "File Update", notificationText,
-            android.R.drawable.ic_dialog_info, pendingIntent
+            R.drawable.ic_notification, pendingIntent
         )
         notificationManager.notify(fileId.hashCode(), notification)
         Log.d(TAG, "Notification shown for $fileId: $notificationText")

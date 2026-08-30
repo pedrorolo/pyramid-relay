@@ -5,16 +5,16 @@
   <linearGradient id="side" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#d79a3c"/><stop offset="1" stop-color="#a85d1d"/></linearGradient>
   <mask id="rayMask">
     <rect width="512" height="512" fill="white"/>
-    <polygon points="256,95 190,225 322,225" fill="black"/>
-    <circle cx="256" cy="158" r="70" fill="black"/>
+     <polygon points="256,95 170,260 342,260" fill="black"/>
+     <circle cx="256" cy="195" r="70" fill="black"/>
   </mask>
 </defs>
 <rect width="512" height="512" fill="#fbe7a8"/>
 <g transform="translate(81.92 81.92) scale(.68)">
 <!-- Rays originate at the file center; masking hides the inner circle and triangle -->
 <g mask="url(#rayMask)" stroke="#FFF8D6" stroke-linecap="round" fill="none">
-<path d="M256 158V30 M256 158L198 42 M256 158L314 42 M256 158L145 78 M256 158L367 78 M256 158L124 105 M256 158L388 105 M256 158L110 136 M256 158L402 136 M256 158L105 175 M256 158L407 175" stroke-width="3" stroke-opacity=".92"/>
-<path d="M256 158L214 38 M256 158L298 38 M256 158L180 68 M256 158L332 68 M256 158L135 119 M256 158L377 119 M256 158L120 205 M256 158L392 205" stroke-width="2" stroke-opacity=".75"/>
+<path d="M256 205V30 M256 205L198 42 M256 205L314 42 M256 205L145 78 M256 205L367 78 M256 205L124 105 M256 205L388 105 M256 205L110 136 M256 205L402 136 M256 205L105 175 M256 205L407 175" stroke-width="3" stroke-opacity=".92"/>
+<path d="M256 205L214 38 M256 205L298 38 M256 205L180 68 M256 205L332 68 M256 205L135 119 M256 205L377 119 M256 205L120 205 M256 205L392 205" stroke-width="2" stroke-opacity=".92"/>
 </g>
 
 <!-- 3D right side continues from the pyramid apex to the base -->
@@ -22,20 +22,20 @@
 <g stroke="#744722" stroke-width="2" opacity=".7"><path d="M274 130l151 277"/><path d="M283 150l142 257"/><path d="M292 174l133 233"/><path d="M302 198l123 209"/><path d="M312 222l113 185"/></g>
 
 <!-- Apex triangle -->
-<polygon points="256,95 190,225 322,225" fill="#fff5d7" fill-opacity=".35" stroke="#694719" stroke-width="5"/>
+<polygon points="256,95 170,260 342,260" fill="#fff5d7" fill-opacity=".35" stroke="#694719" stroke-width="5"/>
 <!-- Retro file icon -->
-<polygon points="232,122 268,122 288,142 288,202 232,202" fill="#fffdf0" stroke="#694719" stroke-width="3"/>
-<polygon points="268,122 268,142 288,142" fill="#d9b56e" stroke="#694719" stroke-width="2"/>
-<g stroke="#b96924" stroke-width="5" stroke-linecap="round"><path d="M242 154h36"/><path d="M242 174h28"/><path d="M242 192h20"/></g>
+<polygon points="228,165 264,165 284,185 284,245 228,245" fill="#fffdf0" stroke="#694719" stroke-width="3"/>
+<polygon points="264,165 264,185 284,185" fill="#d9b56e" stroke="#694719" stroke-width="2"/>
+<g stroke="#b96924" stroke-width="5" stroke-linecap="round"><path d="M238 197h36"/><path d="M238 217h28"/><path d="M238 235h20"/></g>
 <!-- 3D body starts at the exact base of the capstone triangle -->
 <!-- Broad front face -->
-<polygon points="190,225 322,225 425,430 87,430" fill="url(#face)" stroke="#694719" stroke-width="5" stroke-linejoin="round"/>
+<polygon points="170,260 342,260 425,430 87,430" fill="url(#face)" stroke="#694719" stroke-width="5" stroke-linejoin="round"/>
 <!-- Horizontal engraved hatch lines -->
 <g stroke="#71491f" stroke-width="2" stroke-linecap="round" opacity=".65">
-<path d="M232 240h48"/><path d="M220 258h72"/><path d="M207 276h98"/><path d="M193 294h126"/><path d="M179 312h154"/><path d="M165 330h182"/><path d="M151 348h210"/><path d="M136 366h228"/><path d="M121 384h243"/><path d="M106 402h248"/><path d="M89 420h259"/>
+<path d="M230 275h52"/><path d="M220 293h72"/><path d="M210 311h92"/><path d="M200 329h112"/><path d="M190 347h132"/><path d="M180 365h152"/><path d="M170 383h172"/><path d="M160 401h192"/><path d="M150 419h202"/>
 </g>
 <g stroke="#8c5b25" stroke-width="1" opacity=".45">
-<path d="M226 247h60"/><path d="M214 265h84"/><path d="M201 283h110"/><path d="M187 301h138"/><path d="M173 319h166"/><path d="M159 337h194"/><path d="M145 355h222"/><path d="M130 373h239"/><path d="M115 391h249"/><path d="M100 409h254"/>
+<path d="M226 282h60"/><path d="M216 300h80"/><path d="M206 318h100"/><path d="M196 336h120"/><path d="M186 354h140"/><path d="M176 372h160"/><path d="M166 390h180"/><path d="M156 408h200"/><path d="M146 426h220"/>
 </g>
 <path d="M87 430h338" stroke="#694719" stroke-width="5"/>
 </g>
