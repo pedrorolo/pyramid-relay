@@ -139,6 +139,7 @@ class SubscriptionsViewModel(
                 "Deleting subscription \"${subscription.fileName ?: subscription.fileId.takeLast(8)}\" (local v${subscription.localVersion})"
             )
             syncEngine?.cancelTransfer(subscription.fileId)
+            syncEngine?.clearDiscoveryStateForFile(subscription.fileId)
             syncEngine?.stopAdvertisingForFile(subscription.fileId)
             fileService.deleteAll(subscription.fileId)
             subscriptionDao.delete(subscription.fileId)
