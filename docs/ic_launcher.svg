@@ -10,6 +10,7 @@
   </mask>
 </defs>
 <rect width="512" height="512" fill="url(#paper)"/>
+<g transform="translate(25.6 25.6) scale(.9)">
 <!-- Rays originate at the file center; masking hides the inner circle and triangle -->
 <g mask="url(#rayMask)" stroke="#FFF8D6" stroke-linecap="round" fill="none">
 <path d="M256 158V30 M256 158L198 42 M256 158L314 42 M256 158L145 78 M256 158L367 78 M256 158L124 105 M256 158L388 105 M256 158L110 136 M256 158L402 136 M256 158L105 175 M256 158L407 175" stroke-width="3" stroke-opacity=".92"/>
@@ -36,4 +37,5 @@
 <path d="M226 247h60"/><path d="M214 265h84"/><path d="M201 283h110"/><path d="M187 301h138"/><path d="M173 319h166"/><path d="M159 337h194"/><path d="M145 355h222"/><path d="M130 373h239"/><path d="M115 391h249"/><path d="M100 409h254"/>
 </g>
 <path d="M87 430h338" stroke="#694719" stroke-width="5"/>
+</g>
 </svg>

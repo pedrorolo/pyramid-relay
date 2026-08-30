@@ -61,7 +61,7 @@ class MainActivity : ComponentActivity() {
 
     private var showMissingPermsDialog = mutableStateOf(false)
     private var missingPermsMessage = mutableStateOf("")
-    private var showBatteryOptDialog = mutableStateOf(false)
+    private var batteryOptimizationRequestLaunched = false
 
     private val requiredPermissions: Array<String>
         get() {
@@ -85,6 +85,7 @@ class MainActivity : ComponentActivity() {
                 showPermissionError(denied.toList())
             } else {
                 startSyncService()
+                requestBatteryOptimizationExemption()
             }
         }
 
@@ -114,26 +115,6 @@ class MainActivity : ComponentActivity() {
                         }
                     )
                 }
-                if (showBatteryOptDialog.value) {
-                    AlertDialog(
-                        onDismissRequest = { },
-                        title = { Text("Battery Optimization") },
-                        text = { Text("For reliable file transfers, please disable battery optimization for P2P Broadcaster. Without this, transfers may be interrupted when the screen is off.") },
-                        confirmButton = {
-                            TextButton(onClick = {
-                                openBatteryOptimizationSettings()
-                                showBatteryOptDialog.value = false
-                            }) {
-                                Text("Open Settings")
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { showBatteryOptDialog.value = false }) {
-                                Text("Later")
-                            }
-                        }
-                    )
-                }
                 MainScreen(intent)
             }
         }
@@ -145,9 +126,7 @@ class MainActivity : ComponentActivity() {
         }
         if (missing.isEmpty()) {
             startSyncService()
-            if (!isBatteryOptimizationIgnored()) {
-                showBatteryOptDialog.value = true
-            }
+            requestBatteryOptimizationExemption()
         } else {
             permissionLauncher.launch(missing.toTypedArray())
         }
@@ -160,6 +139,12 @@ class MainActivity : ComponentActivity() {
             Log.e(TAG, "Failed to start BLE foreground service", e)
             EventLog.log("app", "Failed to start BLE foreground service: ${e.message}")
         }
+    }
+
+    private fun requestBatteryOptimizationExemption() {
+        if (batteryOptimizationRequestLaunched || isBatteryOptimizationIgnored()) return
+        batteryOptimizationRequestLaunched = true
+        openBatteryOptimizationSettings()
     }
 
     private fun isBatteryOptimizationIgnored(): Boolean {

@@ -1,4 +1,5 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <group android:pivotX="54" android:pivotY="54" android:scaleX="0.9" android:scaleY="0.9">
     <!-- Rays radiate from the file center; only the portions outside the triangle are visible -->
     <path android:pathData="M54,18 L54,8 M47,22 L37,10 M61,22 L71,10 M43,27 L26,16 M65,27 L82,16 M40,34 L24,28 M68,34 L84,28" android:strokeWidth="0.55" android:strokeColor="#F0FFF8D6" />
     <path android:pathData="M54,18 L54,9 M46,22 L34,12 M62,22 L74,12 M42,28 L27,18 M66,28 L81,18 M54,33 L25,43 M54,33 L83,43" android:strokeWidth="0.35" android:strokeColor="#E0FFF8D6" />
@@ -22,4 +23,5 @@
     <path android:pathData="M49,50 L59,50 M45,55 L63,55 M41,60 L67,60 M37,65 L71,65 M33,70 L72,70 M29,75 L73,75 M24,80 L74,80 M19,85 L75,85" android:strokeWidth="0.45" android:strokeColor="#704B3518" />
     <path android:pathData="M47,52 L60,52 M43,57 L65,57 M39,62 L69,62 M35,67 L71,67 M31,72 L72,72 M27,77 L73,77 M22,82 L74,82" android:strokeWidth="0.25" android:strokeColor="#805A3518" />
     <path android:pathData="M18,88 L90,88" android:strokeWidth="0.9" android:strokeColor="#FF5A4218" />
+    </group>
 </vector>
