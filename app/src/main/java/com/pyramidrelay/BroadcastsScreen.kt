@@ -348,13 +348,17 @@ fun BroadcastsScreen(
             onDismissRequest = { showRelayNameDialog = false },
             title = { Text("Relay name") },
             text = {
-                OutlinedTextField(
-                    value = relayNameText,
-                    onValueChange = { relayNameText = it },
-                    label = { Text("e.g. photos-team") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("#", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    OutlinedTextField(
+                        value = relayNameText,
+                        onValueChange = { relayNameText = it },
+                        label = { Text("e.g. my-relay") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
