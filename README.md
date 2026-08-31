@@ -1,14 +1,19 @@
 # Pyramid Relay
 
-P2P file-sharing app for Android. Broadcast files to nearby devices via BLE — no internet required.
+P2P file-sharing app for Android. Designed for **offline environments** — events with crowded networks, remote locations, or anywhere without internet access.
+
+Share files and push updates to nearby devices via BLE — no Wi-Fi or internet required. Subscribers automatically relay what they receive to other peers, creating a resilient mesh that scales without internet connectivity.
+
+**Example use case:** An event organizer broadcasts the programme schedule. Attendees subscribe via QR code. When the organizer pushes an updated schedule, all subscribed attendees receive the update — and continue relaying it to others who join later.
 
 ## Features
 
+- **Offline-first** — works without internet, even in remote locations or crowded venues
 - **Broadcast** files from your device to anyone nearby
 - **Subscribe** via QR code or share link
-- **Relay** — received files are automatically re-advertised to other peers
+- **Relay** — subscribers automatically re-advertise received files to other peers, extending range organically
+- **Versioned updates** — push new versions of a broadcast; subscribers are notified and receive the update automatically
 - **Encrypted** — files are compressed and encrypted with hybrid RSA/AES-GCM before transfer
-- **Offline** — uses Bluetooth Low Energy (BLE) GATT; no Wi-Fi or internet
 
 ## Tech Stack
 
@@ -63,13 +68,14 @@ Requires a physical Android device. Connect via ADB before building.
 2. App generates an RSA keypair and signs the file metadata
 3. File is compressed, encrypted, and stored privately
 4. App advertises via BLE GATT in the background
+5. When a new version is published, all subscribers are notified and receive the update
 
 ### Subscribing
 
 1. Scan a QR code or paste a share link
 2. App connects via BLE GATT and reads file metadata
 3. If a newer version is available, the file is downloaded and verified
-4. File is saved and automatically relayed to other peers
+4. File is saved and automatically re-advertised to other peers (relay mode)
 
 ### Transfer Protocol
 
