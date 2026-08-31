@@ -77,7 +77,8 @@ class SubscriptionsViewModel(
     private val broadcastDao: BroadcastDao,
     private val fileService: FileService,
     private val cryptoService: CryptoService,
-    private val syncEngine: SyncEngine? = null
+    private val syncEngine: SyncEngine? = null,
+    private val notificationService: NotificationService? = null
 ) : ViewModel() {
     private val _subscriptions = MutableStateFlow<List<SubscriptionEntity>>(emptyList())
     val subscriptions: StateFlow<List<SubscriptionEntity>> = _subscriptions.asStateFlow()
@@ -117,7 +118,8 @@ class SubscriptionsViewModel(
                 val fileIdHash = cryptoService.fileIdHash(fileId).joinToString("") { "%02x".format(it) }
                 val existingHidden = subscriptionDao.getById(fileIdHash)
                 if (existingHidden != null && existingHidden.hidden) {
-                    // Convert hidden to visible
+                    val hadFile = existingHidden.localVersion != null
+                    val prevVersion = existingHidden.localVersion ?: 0
                     subscriptionDao.upsert(
                         SubscriptionEntity(
                             fileId, publicKeyBase64, null, relayName, false,
@@ -128,6 +130,12 @@ class SubscriptionsViewModel(
                     )
                     subscriptionDao.delete(fileIdHash)
                     EventLog.log("sub", "Converted hidden subscription to visible: ${relayName ?: fileId.takeLast(8)}")
+                    if (hadFile) {
+                        val name = relayName ?: fileId.takeLast(8)
+                        notificationService?.showUpdateNotification(name, fileId, prevVersion, prevVersion)
+                        subscriptionDao.updateLastNotified(fileId, prevVersion)
+                        EventLog.log("sub", "Notified: File \"$name\" retrieved (was hidden)")
+                    }
                 } else {
                     subscriptionDao.upsert(
                         SubscriptionEntity(
@@ -197,7 +205,8 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
             app.broadcastDao,
             app.fileService,
             app.cryptoService,
-            app.syncEngine
+            app.syncEngine,
+            app.notificationService
         )
     }
     val subscriptions by viewModel.subscriptions.collectAsState()
