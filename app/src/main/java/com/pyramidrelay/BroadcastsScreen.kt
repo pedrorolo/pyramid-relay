@@ -181,19 +181,8 @@ fun BroadcastsScreen(
     val bluetoothAvailable by app.syncEngine.isBluetoothAvailable.collectAsState()
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
     var showRelayNameDialog by remember { mutableStateOf(false) }
-    var showFileSizeError by remember { mutableStateOf(false) }
-    val maxFileSize = 20L * 1024 * 1024
     val pickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        uri?.let {
-            val size = try {
-                context.contentResolver.openFileDescriptor(it, "r")?.use { fd -> fd.statSize } ?: 0L
-            } catch (_: Exception) { 0L }
-            if (size > maxFileSize) {
-                showFileSizeError = true
-            } else {
-                pendingUri = it; showRelayNameDialog = true
-            }
-        }
+        uri?.let { pendingUri = it; showRelayNameDialog = true }
     }
     var updateTarget by remember { mutableStateOf<BroadcastEntity?>(null) }
     var showUpdateConfirm by remember { mutableStateOf<BroadcastEntity?>(null) }
@@ -350,15 +339,6 @@ fun BroadcastsScreen(
                 }) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { showDeleteConfirm = null }) { Text("Cancel") } }
-        )
-    }
-
-    if (showFileSizeError) {
-        AlertDialog(
-            onDismissRequest = { showFileSizeError = false },
-            title = { Text("File too large") },
-            text = { Text("The maximum file size is 20 MB. Please select a smaller file.") },
-            confirmButton = { TextButton(onClick = { showFileSizeError = false }) { Text("OK") } }
         )
     }
 

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.filled.BroadcastOnHome
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -224,6 +225,17 @@ fun MainScreen(intent: Intent? = null) {
                     },
                     icon = { Icon(Icons.AutoMirrored.Filled.ListAlt, contentDescription = "Log") },
                     label = { Text("Log") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 3,
+                    onClick = {
+                        selectedTab = 3
+                        navController.navigate("settings") {
+                            popUpTo("log")
+                        }
+                    },
+                    icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
+                    label = { Text("Settings") }
                 )
             }
         }

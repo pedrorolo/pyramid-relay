@@ -46,6 +46,7 @@ class SyncEngine(
         private const val TAG = "SyncEngine"
         private const val DEDUP_TTL_MS = 300_000L
         private const val PROBE_COOLDOWN_MS = 300_000L
+        const val MAX_FILE_SIZE = 5L * 1024 * 1024
     }
 
     private val scope = testScope ?: CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -449,6 +450,10 @@ class SyncEngine(
             val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
                 EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting relay update"); return false
             }
+            if (metaPayload.fileSize > MAX_FILE_SIZE) {
+                EventLog.log("sync", "Relay file too large to download (${metaPayload.fileSize}B > ${MAX_FILE_SIZE}B) - aborting")
+                return false
+            }
             // Use the public key from the broadcast entity (originator), not from META
             val hashHex = metaPayload.fileHash.joinToString("") { "%02x".format(it) }
             val tmpFile = fileService.getTmpFile(broadcast.fileId, newVersion)
@@ -546,6 +551,10 @@ class SyncEngine(
             val fileIdHash = cryptoService.fileIdHash(subscription.fileId)
             val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
                 EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting fetch"); return@withTimeout
+            }
+            if (metaPayload.fileSize > MAX_FILE_SIZE) {
+                EventLog.log("sync", "File too large to download (${metaPayload.fileSize}B > ${MAX_FILE_SIZE}B) - aborting")
+                return@withTimeout
             }
             // Use the public key from the subscription (obtained from QR code/link), not from META
             val hashHex = metaPayload.fileHash.joinToString("") { "%02x".format(it) }
@@ -708,6 +717,10 @@ class SyncEngine(
             val fileIdHash = subscription.fileId.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
             val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
                 EventLog.log("sync", "No meta payload for hidden ${subscription.fileId.takeLast(8)}"); return false
+            }
+            if (metaPayload.fileSize > MAX_FILE_SIZE) {
+                EventLog.log("sync", "Hidden file too large to download (${metaPayload.fileSize}B > ${MAX_FILE_SIZE}B) - aborting")
+                return false
             }
             val tmpFile = fileService.getTmpFile(subscription.fileId, newVersion)
             tmpFile.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IllegalStateException("Cannot create dir") }
