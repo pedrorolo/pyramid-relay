@@ -42,6 +42,7 @@ class AppDatabase(context: android.content.Context) : SQLiteOpenHelper(context, 
                 publicKey TEXT NOT NULL,
                 fileName TEXT,
                 relayName TEXT,
+                hidden INTEGER NOT NULL DEFAULT 0,
                 localVersion INTEGER,
                 localUri TEXT,
                 subscribedAt INTEGER NOT NULL,
@@ -177,6 +178,7 @@ class SubscriptionDao(private val db: AppDatabase) {
         val cv = ContentValues().apply {
             put("fileId", subscription.fileId); put("publicKey", subscription.publicKey)
             put("fileName", subscription.fileName); put("relayName", subscription.relayName)
+            put("hidden", if (subscription.hidden) 1 else 0)
             put("localVersion", subscription.localVersion)
             put("localUri", subscription.localUri); put("subscribedAt", subscription.subscribedAt)
             put("lastSeenVersion", subscription.lastSeenVersion); put("lastSeenAt", subscription.lastSeenAt)
@@ -213,11 +215,28 @@ class SubscriptionDao(private val db: AppDatabase) {
         notifyChange()
     }
 
+    suspend fun getHiddenCount(): Int = withContext(Dispatchers.IO) {
+        val cursor = db.readableDatabase.query("subscriptions", arrayOf("COUNT(*)"), "hidden=1", null, null, null, null)
+        cursor.use { if (it.moveToFirst()) it.getInt(0) else 0 }
+    }
+
+    suspend fun getOldestHidden(): SubscriptionEntity? = withContext(Dispatchers.IO) {
+        val cursor = db.readableDatabase.query("subscriptions", null, "hidden=1", null, null, null, "subscribedAt ASC", "1")
+        cursor.use { if (it.moveToFirst()) cursorToEntity(it) else null }
+    }
+
+    suspend fun setHidden(fileId: String, hidden: Boolean) = withContext(Dispatchers.IO) {
+        val cv = ContentValues().apply { put("hidden", if (hidden) 1 else 0) }
+        db.writableDatabase.update("subscriptions", cv, "fileId=?", arrayOf(fileId))
+        notifyChange()
+    }
+
     private fun cursorToEntity(c: Cursor): SubscriptionEntity = SubscriptionEntity(
         fileId = c.getString(c.getColumnIndexOrThrow("fileId")),
         publicKey = c.getString(c.getColumnIndexOrThrow("publicKey")),
         fileName = c.getString(c.getColumnIndexOrThrow("fileName")),
         relayName = c.getString(c.getColumnIndexOrThrow("relayName")),
+        hidden = c.getInt(c.getColumnIndexOrThrow("hidden")) != 0,
         localVersion = c.getInt(c.getColumnIndexOrThrow("localVersion")).let { if (c.isNull(c.getColumnIndexOrThrow("localVersion"))) null else it },
         localUri = c.getString(c.getColumnIndexOrThrow("localUri")),
         subscribedAt = c.getLong(c.getColumnIndexOrThrow("subscribedAt")),
