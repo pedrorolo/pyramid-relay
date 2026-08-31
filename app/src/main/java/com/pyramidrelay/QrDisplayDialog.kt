@@ -25,11 +25,14 @@ fun QrDisplayDialog(
     fileId: String,
     pk: String,
     relayName: String?,
+    fileName: String?,
     version: Int,
     onDismiss: () -> Unit
 ) {
-    val nameParam = relayName?.let { "relayName=$it" } ?: "fileName="
-    val uri = "pyramidrelay://subscribe?fileId=$fileId&pk=$pk&$nameParam&v=$version"
+    val relayParam = relayName?.takeIf { it.isNotBlank() }?.let { "relayName=$it" } ?: ""
+    val fileParam = fileName?.takeIf { it.isNotBlank() }?.let { "fileName=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: ""
+    val params = listOf(relayParam, fileParam).filter { it.isNotEmpty() }.joinToString("&")
+    val uri = "pyramidrelay://subscribe?fileId=$fileId&pk=$pk${if (params.isNotEmpty()) "&$params" else ""}&v=$version"
     val bitmap = remember(uri) {
         try {
             BarcodeEncoder().encodeBitmap(uri, BarcodeFormat.QR_CODE, 400, 400)
@@ -48,6 +51,8 @@ fun QrDisplayDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 if (relayName != null) {
                     Text("v$version | #$relayName", modifier = Modifier.padding(top = 8.dp))
+                } else if (fileName != null) {
+                    Text("v$version | $fileName", modifier = Modifier.padding(top = 8.dp))
                 } else {
                     Text("v$version", modifier = Modifier.padding(top = 8.dp))
                 }

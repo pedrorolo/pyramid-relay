@@ -179,7 +179,7 @@ class BroadcastsViewModel(
 
 @Composable
 fun BroadcastsScreen(
-    onShareQr: (fileId: String, pk: String, relayName: String?, version: Int) -> Unit = { _, _, _, _ -> }
+    onShareQr: (fileId: String, pk: String, relayName: String?, fileName: String?, version: Int) -> Unit = { _, _, _, _, _ -> }
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as P2PBroadcasterApp
@@ -315,13 +315,15 @@ fun BroadcastsScreen(
                                     IconButton(onClick = {
                                         val pkBytes = try { Base64.getDecoder().decode(broadcast.publicKey) } catch (e: Exception) { Base64.getUrlDecoder().decode(broadcast.publicKey) }
                                         val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
-                                        onShareQr(broadcast.fileId, pkUrl, broadcast.relayName, broadcast.version)
+                                        onShareQr(broadcast.fileId, pkUrl, broadcast.relayName, broadcast.fileName, broadcast.version)
                                     }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.QrCode, contentDescription = "Share QR", modifier = Modifier.size(20.dp)) }
                                     IconButton(onClick = {
                                         val pkBytes = try { Base64.getDecoder().decode(broadcast.publicKey) } catch (e: Exception) { Base64.getUrlDecoder().decode(broadcast.publicKey) }
                                         val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
-                                        val nameParam = broadcast.relayName?.let { "relayName=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: "fileName=${java.net.URLEncoder.encode(broadcast.fileName, "UTF-8")}"
-                                        val link = "pyramidrelay://subscribe?fileId=${broadcast.fileId}&pk=$pkUrl&$nameParam&v=${broadcast.version}"
+                                        val relayParam = broadcast.relayName?.takeIf { it.isNotBlank() }?.let { "relayName=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: ""
+                                        val fileParam = "fileName=${java.net.URLEncoder.encode(broadcast.fileName, "UTF-8")}"
+                                        val params = listOf(relayParam, fileParam).filter { it.isNotEmpty() }.joinToString("&")
+                                        val link = "pyramidrelay://subscribe?fileId=${broadcast.fileId}&pk=$pkUrl${if (params.isNotEmpty()) "&$params" else ""}&v=${broadcast.version}"
                                         val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                             type = "text/plain"
                                             putExtra(Intent.EXTRA_TEXT, link)

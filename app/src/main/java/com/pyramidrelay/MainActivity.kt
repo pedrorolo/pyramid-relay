@@ -249,8 +249,12 @@ fun MainScreen(intent: Intent? = null) {
         ) {
             composable("broadcasts") {
                 BroadcastsScreen(
-                    onShareQr = { fileId, pk, relayName, version ->
-                        navController.navigate("qr_display?fileId=$fileId&pk=$pk&relayName=$relayName&v=$version")
+                    onShareQr = { fileId, pk, relayName, fileName, version ->
+                        val params = buildList {
+                            relayName?.let { add("relayName=$it") }
+                            fileName?.let { add("fileName=${java.net.URLEncoder.encode(it, "UTF-8")}") }
+                        }.joinToString("&")
+                        navController.navigate("qr_display?fileId=$fileId&pk=$pk${if (params.isNotEmpty()) "&$params" else ""}&v=$version")
                     }
                 )
             }
@@ -275,11 +279,12 @@ fun MainScreen(intent: Intent? = null) {
                 SettingsScreen()
             }
             composable(
-                "qr_display?fileId={fileId}&pk={pk}&relayName={relayName}&v={v}",
+                "qr_display?fileId={fileId}&pk={pk}&relayName={relayName}&fileName={fileName}&v={v}",
                 arguments = listOf(
                     navArgument("fileId") { type = NavType.StringType },
                     navArgument("pk") { type = NavType.StringType },
                     navArgument("relayName") { type = NavType.StringType; nullable = true; defaultValue = null },
+                    navArgument("fileName") { type = NavType.StringType; nullable = true; defaultValue = null },
                     navArgument("v") { type = NavType.IntType }
                 )
             ) { backStackEntry ->
@@ -287,6 +292,7 @@ fun MainScreen(intent: Intent? = null) {
                     fileId = backStackEntry.arguments?.getString("fileId") ?: "",
                     pk = backStackEntry.arguments?.getString("pk") ?: "",
                     relayName = backStackEntry.arguments?.getString("relayName"),
+                    fileName = backStackEntry.arguments?.getString("fileName"),
                     version = backStackEntry.arguments?.getInt("v") ?: 1,
                     onDismiss = { navController.popBackStack() }
                 )
