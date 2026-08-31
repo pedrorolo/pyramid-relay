@@ -79,6 +79,8 @@ Requires a physical Android device. Connect via ADB before building.
 3. If a newer version is available, the file is downloaded and verified
 4. File is saved and automatically re-advertised to other peers (relay mode)
 
+Once a subscriber receives a file, they become a relay — re-advertising the content to other nearby peers. This creates a mesh network where files propagate organically as more people subscribe.
+
 The QR code/link functions as a key — it contains the file ID and public key needed to connect and read the content from any relaying peer.
 
 ### Transfer Protocol
