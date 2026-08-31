@@ -41,7 +41,7 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 - **Max file size**: Unlimited (no enforced limit)
 - **Max concurrent transfers**: 1 transfer at a time (upload OR download) — enforced by shared `transferSemaphore`
 - **Max retries**: 3 attempts per file (prevents infinite retry loops)
-- **Dedup TTL**: 60 seconds (prevents duplicate advertisement processing)
+- **Dedup TTL**: 30 seconds (prevents duplicate advertisement processing)
 - **Probe cooldown**: 30 seconds (per-device+file, allows re-probing when peers return to range)
 - **Download timeout**: 60 minutes per file
 - **BLE timeouts**: 90s per meta read attempt; fetchFile timeout is 60s + size-based (expectedSize * 1000 / 5000 ms, worst-case 5 KB/s)

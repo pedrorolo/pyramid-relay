@@ -44,8 +44,8 @@ class SyncEngine(
 ) {
     companion object {
         private const val TAG = "SyncEngine"
-        private const val DEDUP_TTL_MS = 300_000L
-        private const val PROBE_COOLDOWN_MS = 300_000L
+        private const val DEDUP_TTL_MS = 30_000L
+        private const val PROBE_COOLDOWN_MS = 30_000L
         const val MAX_FILE_SIZE = 10L * 1024 * 1024
     }
 
