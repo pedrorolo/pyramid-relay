@@ -4,7 +4,10 @@ P2P file-sharing app for Android. Designed for **offline environments** — even
 
 Share files and push updates to nearby devices via **BLE** (Bluetooth Low Energy) — no Wi-Fi or internet required. Subscribers automatically relay what they receive to other peers, creating a resilient mesh that scales without internet connectivity.
 
-**Use cases:** An event organizer broadcasts the programme schedule — attendees subscribe via QR code, and when the organizer pushes an update, all subscribers receive it and continue relaying it to others who join later. Families or communities in remote locations without internet can use Pyramid Relay as a local file sharing infrastructure, sharing documents, updates, and media directly between devices. The QR code or share link acts as the key — it contains the file ID and public key needed to connect and read the content from any relaying peer.
+**Use cases:**
+- An event organizer broadcasts the programme schedule — attendees subscribe via QR code, and when the organizer pushes an update, all subscribers receive it and continue relaying it to others who join later.
+- Families or communities in remote locations without internet can use Pyramid Relay as a local file sharing infrastructure, sharing documents, updates, and media directly between devices.
+- The QR code or share link acts as the key — it contains the file ID and public key needed to connect and read the content from any relaying peer.
 
 ## Features
 
