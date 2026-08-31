@@ -122,7 +122,7 @@ class SubscriptionsViewModel(
                     val prevVersion = existingHidden.localVersion ?: 0
                     subscriptionDao.upsert(
                         SubscriptionEntity(
-                            fileId, publicKeyBase64, null, relayName, false,
+                            fileId, publicKeyBase64, existingHidden.fileName, relayName, false,
                             existingHidden.localVersion, existingHidden.localUri,
                             existingHidden.subscribedAt, existingHidden.lastSeenVersion,
                             existingHidden.lastSeenAt, existingHidden.lastNotifiedVersion

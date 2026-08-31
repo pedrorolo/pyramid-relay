@@ -739,7 +739,8 @@ class SyncEngine(
             envelopeFile.writeBytes(encrypted)
             tmpFile.delete()
             // Store the encrypted file for relaying — do NOT decrypt
-            subscriptionDao.updateReceived(subscription.fileId, newVersion, envelopeFile.absolutePath, newVersion, System.currentTimeMillis())
+            val resolvedFileName = metaPayload.fileName.takeIf { it.isNotBlank() } ?: subscription.fileName
+            subscriptionDao.updateReceived(subscription.fileId, newVersion, envelopeFile.absolutePath, newVersion, System.currentTimeMillis(), resolvedFileName)
             EventLog.log("sync", "Hidden relay stored ${subscription.fileId.takeLast(8)} v$newVersion (${encrypted.size}B)")
             // Advertise for relay
             val serviceData = hiddenServiceData[subscription.fileId]
