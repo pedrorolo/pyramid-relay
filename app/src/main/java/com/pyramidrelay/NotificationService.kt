@@ -34,7 +34,7 @@ class NotificationService(private val context: Context) {
         notificationManager.createNotificationChannel(fgChannel)
     }
 
-    fun createForegroundNotification(): Notification? {
+    fun createForegroundNotification(persistent: Boolean = true): Notification? {
         val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -46,7 +46,7 @@ class NotificationService(private val context: Context) {
             .setContentText("Keep this notification to relay files to nearby devices")
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
-            .setOngoing(true)
+            .setOngoing(persistent)
             .setSilent(true)
             .setVisibility(androidx.core.app.NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(androidx.core.app.NotificationCompat.CATEGORY_SERVICE)

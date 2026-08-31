@@ -753,12 +753,13 @@ class SyncEngine(
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching hidden ${subscription.fileId}", e)
             EventLog.log("sync", "Error fetching hidden: ${e.message}")
+        } finally {
+            activeDownloadPeers.remove(deviceAddress)
+            _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId
+            _downloadProgress.value = _downloadProgress.value - subscription.fileId
+            downloadingFileDeviceMap.remove(subscription.fileId)
+            resumeAdvertisingAndScanning()
         }
-        activeDownloadPeers.remove(deviceAddress)
-        _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId
-        _downloadProgress.value = _downloadProgress.value - subscription.fileId
-        downloadingFileDeviceMap.remove(subscription.fileId)
-        resumeAdvertisingAndScanning()
         return downloadResult
         } // peerLock
         }
@@ -782,6 +783,7 @@ class SyncEngine(
             EventLog.log("sync", "Disconnected from ${deviceAddress.takeLast(5)} for cancelled transfer ${fileId.takeLast(8)}")
         }
         blePeripheralService.stopStreaming(fileId)
+        resumeAdvertisingAndScanning()
     }
 
     /**

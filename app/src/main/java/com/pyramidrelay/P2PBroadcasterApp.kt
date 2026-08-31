@@ -21,6 +21,8 @@ class P2PBroadcasterApp : Application() {
         private set
     lateinit var syncEngine: SyncEngine
         private set
+    lateinit var settingsStore: SettingsStore
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -37,6 +39,7 @@ class P2PBroadcasterApp : Application() {
             this, broadcastDao, subscriptionDao, cryptoService, fileService,
             bleCentralService, blePeripheralService, notificationService, transferSemaphore
         )
+        settingsStore = SettingsStore(this)
         syncEngine.start()
     }
 }

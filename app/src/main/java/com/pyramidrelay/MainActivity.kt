@@ -269,6 +269,9 @@ fun MainScreen(intent: Intent? = null) {
             composable("log") {
                 LogScreen()
             }
+            composable("settings") {
+                SettingsScreen()
+            }
             composable(
                 "qr_display?fileId={fileId}&pk={pk}&relayName={relayName}&v={v}",
                 arguments = listOf(

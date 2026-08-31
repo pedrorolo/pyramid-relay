@@ -261,9 +261,9 @@ class BleCentralService(private val context: Context) {
             private fun resetInactivityTimer(gatt: BluetoothGatt) {
                 inactivityJob?.cancel()
                 inactivityJob = scope.launch {
-                    delay(60_000L)
+                    delay(30_000L)
                     if (!deferred.isCompleted) {
-                        EventLog.log("ble", "fetchFile: inactivity timeout (60s) — aborting")
+                        EventLog.log("ble", "fetchFile: inactivity timeout (30s) — aborting")
                         deferred.complete(false)
                         gatt.disconnect()
                     }
