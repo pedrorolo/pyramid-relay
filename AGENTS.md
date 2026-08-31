@@ -51,8 +51,8 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 
 ## File Structure
 
-- `app/src/main/java/p2p/broadcaster/` — all source code (flat, no subdirectories for services)
-- `app/src/test/java/p2p/broadcaster/` — unit tests
+- `app/src/main/java/com/pyramidrelay/` — all source code (flat, no subdirectories for services)
+- `app/src/test/java/com/pyramidrelay/` — unit tests
 - `docs/specifications.md` — detailed spec (278 lines)
 
 ## Key Components

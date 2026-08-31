@@ -14,13 +14,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
-class AppDatabase(context: android.content.Context) : SQLiteOpenHelper(context, "p2p_broadcaster.db", null, 3) {
+class AppDatabase(context: android.content.Context) : SQLiteOpenHelper(context, "pyramidrelay.db", null, 3) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""
             CREATE TABLE broadcasts (
                 fileId TEXT PRIMARY KEY,
                 fileName TEXT NOT NULL,
+                relayName TEXT NOT NULL,
                 mimeType TEXT NOT NULL,
                 internalUri TEXT NOT NULL,
                 fileHash TEXT NOT NULL,
@@ -40,6 +41,7 @@ class AppDatabase(context: android.content.Context) : SQLiteOpenHelper(context, 
                 fileId TEXT PRIMARY KEY,
                 publicKey TEXT NOT NULL,
                 fileName TEXT,
+                relayName TEXT,
                 localVersion INTEGER,
                 localUri TEXT,
                 subscribedAt INTEGER NOT NULL,
@@ -97,6 +99,7 @@ class BroadcastDao(private val db: AppDatabase) {
         val cv = ContentValues().apply {
             put("fileId", broadcast.fileId)
             put("fileName", broadcast.fileName)
+            put("relayName", broadcast.relayName)
             put("mimeType", broadcast.mimeType)
             put("internalUri", broadcast.internalUri)
             put("fileHash", broadcast.fileHash)
@@ -135,6 +138,7 @@ class BroadcastDao(private val db: AppDatabase) {
         return BroadcastEntity(
             fileId = c.getString(c.getColumnIndexOrThrow("fileId")),
             fileName = c.getString(c.getColumnIndexOrThrow("fileName")),
+            relayName = c.getString(c.getColumnIndexOrThrow("relayName")),
             mimeType = c.getString(c.getColumnIndexOrThrow("mimeType")),
             internalUri = c.getString(c.getColumnIndexOrThrow("internalUri")),
             fileHash = c.getString(c.getColumnIndexOrThrow("fileHash")),
@@ -172,7 +176,8 @@ class SubscriptionDao(private val db: AppDatabase) {
     suspend fun upsert(subscription: SubscriptionEntity) = withContext(Dispatchers.IO) {
         val cv = ContentValues().apply {
             put("fileId", subscription.fileId); put("publicKey", subscription.publicKey)
-            put("fileName", subscription.fileName); put("localVersion", subscription.localVersion)
+            put("fileName", subscription.fileName); put("relayName", subscription.relayName)
+            put("localVersion", subscription.localVersion)
             put("localUri", subscription.localUri); put("subscribedAt", subscription.subscribedAt)
             put("lastSeenVersion", subscription.lastSeenVersion); put("lastSeenAt", subscription.lastSeenAt)
             put("lastNotifiedVersion", subscription.lastNotifiedVersion)
@@ -212,6 +217,7 @@ class SubscriptionDao(private val db: AppDatabase) {
         fileId = c.getString(c.getColumnIndexOrThrow("fileId")),
         publicKey = c.getString(c.getColumnIndexOrThrow("publicKey")),
         fileName = c.getString(c.getColumnIndexOrThrow("fileName")),
+        relayName = c.getString(c.getColumnIndexOrThrow("relayName")),
         localVersion = c.getInt(c.getColumnIndexOrThrow("localVersion")).let { if (c.isNull(c.getColumnIndexOrThrow("localVersion"))) null else it },
         localUri = c.getString(c.getColumnIndexOrThrow("localUri")),
         subscribedAt = c.getLong(c.getColumnIndexOrThrow("subscribedAt")),

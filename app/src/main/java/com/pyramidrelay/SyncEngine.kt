@@ -624,7 +624,7 @@ class SyncEngine(
             relayPayload[6] = ((newVersion ushr 24) and 0xFF).toByte(); relayPayload[7] = ((newVersion ushr 16) and 0xFF).toByte()
             relayPayload[8] = ((newVersion ushr 8) and 0xFF).toByte(); relayPayload[9] = (newVersion and 0xFF).toByte()
             cryptoService.keyId(subscription.publicKey).copyInto(relayPayload, 10)
-            broadcastDao.upsert(BroadcastEntity(subscription.fileId, resolvedFileName ?: "File", "application/octet-stream", internalFile.absolutePath, Base64.getEncoder().encodeToString(metaPayload.fileHash), internalFile.length(), metaPayload.fileSize, newVersion, subscription.publicKey, null, "", Role.RELAY, subscription.subscribedAt, System.currentTimeMillis()))
+            broadcastDao.upsert(BroadcastEntity(subscription.fileId, resolvedFileName ?: "File", subscription.relayName ?: subscription.fileId.take(8), "application/octet-stream", internalFile.absolutePath, Base64.getEncoder().encodeToString(metaPayload.fileHash), internalFile.length(), metaPayload.fileSize, newVersion, subscription.publicKey, null, "", Role.RELAY, subscription.subscribedAt, System.currentTimeMillis()))
             blePeripheralService.startAdvertising(subscription.fileId, relayPayload)
             EventLog.log("adv", "Relaying \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
             onFileReceived?.invoke(subscription.fileId, newVersion)

@@ -33,6 +33,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
@@ -83,7 +84,7 @@ class BroadcastsViewModel(
         _broadcasts.value = broadcastDao.getAll().filter { it.role == Role.ORIGINATOR }
     }
 
-    fun importAndBroadcast(uri: Uri, context: android.content.Context) {
+    fun importAndBroadcast(uri: Uri, context: android.content.Context, relayName: String) {
         viewModelScope.launch {
             val fileId = UUID.randomUUID().toString()
             val keyPair = cryptoService.generateRsaKeyPair()
@@ -103,7 +104,7 @@ class BroadcastsViewModel(
             val signatureStr = ""
             broadcastDao.upsert(
                 BroadcastEntity(
-                    fileId, fileName, mimeType, file.absolutePath, hashStr,
+                    fileId, fileName, relayName, mimeType, file.absolutePath, hashStr,
                     fileBytes.size.toLong(), fileBytes.size.toLong(), version, publicKeyStr, alias, signatureStr,
                     Role.ORIGINATOR, System.currentTimeMillis(), System.currentTimeMillis()
                 )
@@ -167,7 +168,7 @@ class BroadcastsViewModel(
 
 @Composable
 fun BroadcastsScreen(
-    onShareQr: (fileId: String, pk: String, name: String, version: Int) -> Unit = { _, _, _, _ -> }
+    onShareQr: (fileId: String, pk: String, relayName: String, version: Int) -> Unit = { _, _, _, _ -> }
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as P2PBroadcasterApp
@@ -178,8 +179,10 @@ fun BroadcastsScreen(
     val streamingProgress by viewModel.streamingProgress.collectAsState()
     val currentAdvertisingFileId by viewModel.currentAdvertisingFileId.collectAsState()
     val bluetoothAvailable by app.syncEngine.isBluetoothAvailable.collectAsState()
+    var pendingUri by remember { mutableStateOf<Uri?>(null) }
+    var showRelayNameDialog by remember { mutableStateOf(false) }
     val pickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        uri?.let { viewModel.importAndBroadcast(it, context) }
+        uri?.let { pendingUri = it; showRelayNameDialog = true }
     }
     var updateTarget by remember { mutableStateOf<BroadcastEntity?>(null) }
     var showUpdateConfirm by remember { mutableStateOf<BroadcastEntity?>(null) }
@@ -256,6 +259,7 @@ fun BroadcastsScreen(
 
                         Row(modifier = Modifier.fillMaxWidth().padding(12.dp).height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
                             Column(modifier = Modifier.weight(1f)) {
+                                Text("#${broadcast.relayName}", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                 Text(broadcast.fileName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.clickable { saveAndOpen() })
                                 val compressedText = if (broadcast.compressedSize in 1 until broadcast.fileSize) " (compressed ${formatSize(broadcast.compressedSize)})" else ""
                                 Text("v${broadcast.version} | ${formatSize(broadcast.fileSize)}$compressedText", style = MaterialTheme.typography.bodySmall)
@@ -276,8 +280,8 @@ fun BroadcastsScreen(
                                     IconButton(onClick = {
                                         val pkBytes = try { Base64.getDecoder().decode(broadcast.publicKey) } catch (e: Exception) { Base64.getUrlDecoder().decode(broadcast.publicKey) }
                                         val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
-                                        val nameEnc = java.net.URLEncoder.encode(broadcast.fileName, "UTF-8")
-                                        val link = "p2pbroadcaster://subscribe?fileId=${broadcast.fileId}&pk=$pkUrl&name=$nameEnc&v=${broadcast.version}"
+                                        val relayNameEnc = java.net.URLEncoder.encode(broadcast.relayName, "UTF-8")
+                                        val link = "pyramidrelay://subscribe?fileId=${broadcast.fileId}&pk=$pkUrl&relayName=$relayNameEnc&v=${broadcast.version}"
                                         val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                             type = "text/plain"
                                             putExtra(Intent.EXTRA_TEXT, link)
@@ -287,7 +291,7 @@ fun BroadcastsScreen(
                                     IconButton(onClick = {
                                         val pkBytes = try { Base64.getDecoder().decode(broadcast.publicKey) } catch (e: Exception) { Base64.getUrlDecoder().decode(broadcast.publicKey) }
                                         val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
-                                        onShareQr(broadcast.fileId, pkUrl, broadcast.fileName, broadcast.version)
+                                        onShareQr(broadcast.fileId, pkUrl, broadcast.relayName, broadcast.version)
                                     }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.QrCode, contentDescription = "Share QR", modifier = Modifier.size(20.dp)) }
                                     IconButton(onClick = { showUpdateConfirm = broadcast }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Refresh, contentDescription = "Update", modifier = Modifier.size(20.dp)) }
                                     IconButton(onClick = { showDeleteConfirm = broadcast }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Delete, contentDescription = "Delete", modifier = Modifier.size(20.dp)) }
@@ -335,6 +339,31 @@ fun BroadcastsScreen(
                 }) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { showDeleteConfirm = null }) { Text("Cancel") } }
+        )
+    }
+
+    if (showRelayNameDialog) {
+        var relayNameText by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showRelayNameDialog = false },
+            title = { Text("Relay name") },
+            text = {
+                OutlinedTextField(
+                    value = relayNameText,
+                    onValueChange = { relayNameText = it },
+                    label = { Text("e.g. photos-team") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showRelayNameDialog = false
+                    pendingUri?.let { viewModel.importAndBroadcast(it, context, relayNameText) }
+                    pendingUri = null
+                }, enabled = relayNameText.isNotBlank()) { Text("Broadcast") }
+            },
+            dismissButton = { TextButton(onClick = { showRelayNameDialog = false; pendingUri = null }) { Text("Cancel") } }
         )
     }
 }

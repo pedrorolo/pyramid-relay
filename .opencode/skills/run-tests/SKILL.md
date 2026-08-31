@@ -1,11 +1,11 @@
 ---
 name: run-tests
-description: Run all unit tests for the P2P Broadcaster Android project. Use when the user asks to run tests, check test status, or verify code changes pass tests.
+description: Run all unit tests for the Pyramid Relay Android project. Use when the user asks to run tests, check test status, or verify code changes pass tests.
 ---
 
 # Run Tests
 
-Run all unit tests for the P2P Broadcaster Android project.
+Run all unit tests for the Pyramid Relay Android project.
 
 ## Command
 

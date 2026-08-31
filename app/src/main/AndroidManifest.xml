@@ -46,7 +46,7 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:scheme="p2pbroadcaster" android:host="subscribe" />
+                <data android:scheme="pyramidrelay" android:host="subscribe" />
             </intent-filter>
         </activity>
 

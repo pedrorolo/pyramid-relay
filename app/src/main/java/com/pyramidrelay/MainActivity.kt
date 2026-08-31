@@ -91,7 +91,7 @@ class MainActivity : ComponentActivity() {
 
     private fun showPermissionError(denied: List<String>) {
         val names = denied.map { REQUIRED_PERMISSION_NAMES[it] ?: it }
-        missingPermsMessage.value = "The following permissions are required:\n\n${names.joinToString("\n") { "• $it" }}\n\nPlease grant them in Settings > Apps > P2P Broadcaster > Permissions, then reopen the app."
+        missingPermsMessage.value = "The following permissions are required:\n\n${names.joinToString("\n") { "• $it" }}\n\nPlease grant them in Settings > Apps > Pyramid Relay > Permissions, then reopen the app."
         showMissingPermsDialog.value = true
         EventLog.log("app", "Permissions denied: ${denied.joinToString(", ")}")
         Log.w(TAG, "Permissions denied: $denied")
@@ -235,8 +235,8 @@ fun MainScreen(intent: Intent? = null) {
         ) {
             composable("broadcasts") {
                 BroadcastsScreen(
-                    onShareQr = { fileId, pk, name, version ->
-                        navController.navigate("qr_display?fileId=$fileId&pk=$pk&name=$name&v=$version")
+                    onShareQr = { fileId, pk, relayName, version ->
+                        navController.navigate("qr_display?fileId=$fileId&pk=$pk&relayName=$relayName&v=$version")
                     }
                 )
             }
@@ -258,18 +258,18 @@ fun MainScreen(intent: Intent? = null) {
                 LogScreen()
             }
             composable(
-                "qr_display?fileId={fileId}&pk={pk}&name={name}&v={v}",
+                "qr_display?fileId={fileId}&pk={pk}&relayName={relayName}&v={v}",
                 arguments = listOf(
                     navArgument("fileId") { type = NavType.StringType },
                     navArgument("pk") { type = NavType.StringType },
-                    navArgument("name") { type = NavType.StringType },
+                    navArgument("relayName") { type = NavType.StringType },
                     navArgument("v") { type = NavType.IntType }
                 )
             ) { backStackEntry ->
                 QrDisplayDialog(
                     fileId = backStackEntry.arguments?.getString("fileId") ?: "",
                     pk = backStackEntry.arguments?.getString("pk") ?: "",
-                    name = backStackEntry.arguments?.getString("name") ?: "",
+                    relayName = backStackEntry.arguments?.getString("relayName") ?: "",
                     version = backStackEntry.arguments?.getInt("v") ?: 1,
                     onDismiss = { navController.popBackStack() }
                 )

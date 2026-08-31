@@ -41,7 +41,7 @@ class BleForegroundService : Service() {
         syncEngine = app.syncEngine
         rePostNotification()
         val pm = getSystemService(POWER_SERVICE) as PowerManager
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "p2p.broadcaster:ble").apply {
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "com.pyramidrelay:ble").apply {
             acquire()
         }
         handler.post(notificationChecker)

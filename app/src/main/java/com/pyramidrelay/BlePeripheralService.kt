@@ -135,7 +135,7 @@ class BlePeripheralService(private val context: Context, private val transferSem
                     val p = stream?.pos ?: 0
                     gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, if (stream != null && p < stream.data.size) byteArrayOf(1) else byteArrayOf(0))
                 } else if (char.uuid == INFO_UUID) {
-                    val info = "P2P Broadcaster v1.0".toByteArray()
+                    val info = "Pyramid Relay v1.0".toByteArray()
                     val sliced = if (offset < info.size) info.copyOfRange(offset, info.size) else byteArrayOf()
                     gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, sliced)
                 }

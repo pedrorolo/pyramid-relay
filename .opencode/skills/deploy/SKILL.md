@@ -34,7 +34,7 @@ adb -s <DEVICE_ID> install -r app/build/outputs/apk/debug/app-debug.apk
 Confirm the package is installed on each device:
 
 ```bash
-adb -s <DEVICE_ID> shell pm list packages p2p.broadcaster
+adb -s <DEVICE_ID> shell pm list packages com.pyramidrelay
 ```
 
 ## APK Location

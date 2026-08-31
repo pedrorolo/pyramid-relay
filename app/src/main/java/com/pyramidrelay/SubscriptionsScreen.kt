@@ -103,11 +103,9 @@ class SubscriptionsViewModel(
         _subscriptions.value = subscriptionDao.getAll()
     }
 
-    fun addSubscription(fileId: String, publicKeyBase64: String, name: String?) {
+    fun addSubscription(fileId: String, publicKeyBase64: String, relayName: String?) {
         viewModelScope.launch {
             try {
-                // Validate before persisting: a malformed key would poison every
-                // later discovery pass (and previously crashed the app).
                 val publicKey = cryptoService.publicKeyFromBase64(publicKeyBase64)
                 cryptoService.storeRecipientKey(publicKey, cryptoService.generateRsaKeyPair())
             } catch (e: Exception) {
@@ -117,15 +115,12 @@ class SubscriptionsViewModel(
             try {
                 subscriptionDao.upsert(
                     SubscriptionEntity(
-                        fileId, publicKeyBase64, name, null, null,
+                        fileId, publicKeyBase64, null, relayName, null, null,
                         System.currentTimeMillis(), null, null, null
                     )
                 )
-                // A fresh subscription must hear the next advertisement of this
-                // file immediately: stale dedup/probe-cooldown state from a
-                // previous subscription of the same file would swallow it.
                 syncEngine?.clearDiscoveryStateForFile(fileId)
-                EventLog.log("sub", "Subscribed to \"${name ?: fileId.takeLast(8)}\" - listening for new versions")
+                EventLog.log("sub", "Subscribed to \"${relayName ?: fileId.takeLast(8)}\" - listening for new versions")
             } catch (e: Exception) {
                 EventLog.log("sub", "Failed to subscribe to ${fileId.takeLast(8)}: ${e.message}")
             }
@@ -136,7 +131,7 @@ class SubscriptionsViewModel(
         viewModelScope.launch {
             EventLog.log(
                 "sub",
-                "Deleting subscription \"${subscription.fileName ?: subscription.fileId.takeLast(8)}\" (local v${subscription.localVersion})"
+                "Deleting subscription \"${subscription.relayName ?: subscription.fileId.takeLast(8)}\" (local v${subscription.localVersion})"
             )
             syncEngine?.cancelTransfer(subscription.fileId)
             syncEngine?.clearDiscoveryStateForFile(subscription.fileId)
@@ -177,7 +172,8 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
     if (initialFileId != null && initialPk != null) {
         var added by remember { mutableStateOf(false) }
         if (!added) {
-            viewModel.addSubscription(initialFileId, initialPk, null); added = true
+            viewModel.addSubscription(initialFileId, initialPk, null)
+            added = true
         }
     }
 
@@ -225,8 +221,8 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
     if (showPasteDialog) {
         PasteLinkDialog(
             onDismiss = { showPasteDialog = false },
-            onConfirm = { fileId, pk, name ->
-                viewModel.addSubscription(fileId, pk, name)
+            onConfirm = { fileId, pk, relayName ->
+                viewModel.addSubscription(fileId, pk, relayName)
                 showPasteDialog = false
             }
         )
@@ -234,8 +230,8 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
     if (showQrScan) {
         QrScanDialog(
             onDismiss = { showQrScan = false },
-            onScanned = { fileId, pk, name ->
-                viewModel.addSubscription(fileId, pk, name)
+            onScanned = { fileId, pk, relayName ->
+                viewModel.addSubscription(fileId, pk, relayName)
                 showQrScan = false
             }
         )
@@ -245,7 +241,7 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = null },
             title = { Text("Delete subscription?") },
-            text = { Text("Permanently delete \"${subscription.fileName ?: subscription.fileId.takeLast(8)}\"? This will stop relaying and remove all local files.") },
+            text = { Text("Permanently delete \"${subscription.relayName ?: subscription.fileId.takeLast(8)}\"? This will stop relaying and remove all local files.") },
             confirmButton = {
                 TextButton(onClick = {
                     showDeleteConfirm = null
@@ -297,7 +293,7 @@ fun SubscriptionRow(
         QrDisplayDialog(
             fileId = subscription.fileId,
             pk = subscription.publicKey,
-            name = subscription.fileName ?: "",
+            relayName = subscription.relayName ?: subscription.fileId.take(8),
             version = subscription.localVersion ?: subscription.lastSeenVersion ?: 1,
             onDismiss = { showQr = false }
         )
@@ -338,7 +334,14 @@ fun SubscriptionRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    subscription.fileName ?: subscription.fileId.take(8),
+                    subscription.relayName?.let { "#$it" } ?: subscription.fileId.take(8),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+                Text(
+                    if (subscription.localVersion != null) subscription.fileName ?: subscription.fileId.take(8)
+                    else subscription.relayName?.let { "#$it" } ?: subscription.fileId.take(8),
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -378,9 +381,9 @@ fun SubscriptionRow(
                             Base64.getUrlDecoder().decode(subscription.publicKey)
                         }
                         val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
-                        val nameEnc = java.net.URLEncoder.encode(subscription.fileName ?: "", "UTF-8")
+                        val relayNameEnc = java.net.URLEncoder.encode(subscription.relayName ?: "", "UTF-8")
                         val link =
-                            "p2pbroadcaster://subscribe?fileId=${subscription.fileId}&pk=$pkUrl&name=$nameEnc&v=${subscription.localVersion ?: subscription.lastSeenVersion ?: 1}"
+                            "pyramidrelay://subscribe?fileId=${subscription.fileId}&pk=$pkUrl&relayName=$relayNameEnc&v=${subscription.localVersion ?: subscription.lastSeenVersion ?: 1}"
                         val shareIntent = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
                             putExtra(Intent.EXTRA_TEXT, link)
@@ -433,7 +436,7 @@ fun SubscriptionRow(
 }
 
 @Composable
-fun PasteLinkDialog(onDismiss: () -> Unit, onConfirm: (fileId: String, pk: String, name: String?) -> Unit) {
+fun PasteLinkDialog(onDismiss: () -> Unit, onConfirm: (fileId: String, pk: String, relayName: String?) -> Unit) {
     var linkText by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     AlertDialog(
@@ -443,7 +446,7 @@ fun PasteLinkDialog(onDismiss: () -> Unit, onConfirm: (fileId: String, pk: Strin
             OutlinedTextField(
                 value = linkText,
                 onValueChange = { linkText = it; error = null },
-                label = { Text("p2pbroadcaster://subscribe?...") },
+                label = { Text("pyramidrelay://subscribe?...") },
                 modifier = Modifier.fillMaxWidth(),
                 isError = error != null,
                 supportingText = error?.let { { Text(it) } }
@@ -455,8 +458,8 @@ fun PasteLinkDialog(onDismiss: () -> Unit, onConfirm: (fileId: String, pk: Strin
                     val uri = Uri.parse(linkText)
                     val fileId = uri.getQueryParameter("fileId") ?: throw Exception("Missing fileId")
                     val pk = uri.getQueryParameter("pk") ?: throw Exception("Missing pk")
-                    val name = uri.getQueryParameter("name")
-                    onConfirm(fileId, pk, name)
+                    val relayName = uri.getQueryParameter("relayName")
+                    onConfirm(fileId, pk, relayName)
                 } catch (e: Exception) {
                     error = "Invalid link format"
                     EventLog.log("app", "Invalid paste link: ${e.message}")

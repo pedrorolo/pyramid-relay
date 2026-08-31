@@ -14,7 +14,7 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
         Log.d(TAG, "Boot completed, starting BLE service")
-        EventLog.log("app", "Device booted — starting P2P Broadcaster service")
+        EventLog.log("app", "Device booted — starting Pyramid Relay service")
         try {
             ContextCompat.startForegroundService(context, Intent(context, BleForegroundService::class.java))
         } catch (e: Exception) {
