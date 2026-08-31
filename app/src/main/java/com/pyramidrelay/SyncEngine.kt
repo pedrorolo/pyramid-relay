@@ -71,7 +71,7 @@ class SyncEngine(
     private val downloadSemaphore = Semaphore(1) // Only one download at a time
     private val uploadSemaphore = Semaphore(1) // Only one upload at a time
     private val downloadRetryCount = ConcurrentHashMap<String, Int>()
-    private val maxRetries = 3
+    private val maxRetries = 10
 
     private val _downloadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
     val downloadProgress: StateFlow<Map<String, Float>> = _downloadProgress.asStateFlow()

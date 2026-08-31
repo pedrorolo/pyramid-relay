@@ -1,5 +1,9 @@
 # Pyramid Relay
 
+![Vibe Coded](https://img.shields.io/badge/%F0%9F%8E%B5_Vibe_Coded-purple?style=for-the-badge)
+
+> **Warning — BLE Stack Instability:** This app uses Android's BLE GATT stack extensively for file transfers. On some devices (particularly Samsung), prolonged or repeated BLE operations can render the OS Bluetooth stack into an inconsistent state. Symptoms include GATT operations timing out, connections being silently dropped, or the device failing to advertise/scan. When this happens, **a device reboot is required** to restore Bluetooth functionality. This is a known Android BLE stack limitation, not a bug in the app.
+
 P2P file-sharing app for Android. Designed for **offline environments** — events with crowded networks, remote locations, or anywhere without internet access.
 
 Share files and push updates to nearby devices via **BLE** (Bluetooth Low Energy) — no Wi-Fi or internet required. Subscribers automatically relay what they receive to other peers, creating a resilient mesh that scales without internet connectivity.

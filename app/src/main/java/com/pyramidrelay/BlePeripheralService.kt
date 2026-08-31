@@ -206,6 +206,7 @@ class BlePeripheralService(private val context: Context, private val transferSem
         Log.d(TAG, "Restarting GATT server")
         gattServer?.close()
         gattServer = null
+        Thread.sleep(100) // Samsung devices need a delay between close and open
         startGattServer()
     }
 
