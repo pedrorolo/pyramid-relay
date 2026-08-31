@@ -257,6 +257,18 @@ class BleCentralService(private val context: Context) {
                 val submit = gatt.writeCharacteristic(streamChar, "PULL v$version".toByteArray(Charsets.UTF_8), android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
                 if (submit != BluetoothGatt.GATT_SUCCESS) { EventLog.log("ble", "fetchFile: PULL write failed to submit ($submit)"); deferred.complete(false) }
             }
+            private var inactivityJob: kotlinx.coroutines.Job? = null
+            private fun resetInactivityTimer(gatt: BluetoothGatt) {
+                inactivityJob?.cancel()
+                inactivityJob = scope.launch {
+                    delay(60_000L)
+                    if (!deferred.isCompleted) {
+                        EventLog.log("ble", "fetchFile: inactivity timeout (60s) — aborting")
+                        deferred.complete(false)
+                        gatt.disconnect()
+                    }
+                }
+            }
             override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
                 if (characteristic.uuid == STREAM_UUID) {
                     if (status != BluetoothGatt.GATT_SUCCESS) {
@@ -272,18 +284,21 @@ class BleCentralService(private val context: Context) {
                                 gatt.disconnect()
                             }
                         }
+                        resetInactivityTimer(gatt)
                     }
                 }
             }
             @Deprecated("Deprecated in Java")
             override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
                 if (characteristic.uuid != STREAM_UUID || deferred.isCompleted) return
+                resetInactivityTimer(gatt)
                 buffer.write(value)
                 val got = buffer.size()
                 onProgress?.invoke(got.toLong(), expectedSize)
                 if ((got - value.size) / 40_720 != got / 40_720 || got.toLong() == expectedSize)
                     EventLog.log("ble", "Downloading... $got/$expectedSize B")
                 if (value.isEmpty() || got >= expectedSize) {
+                    inactivityJob?.cancel()
                     EventLog.log("ble", "fetchFile: writing ${buffer.size()}B to output stream on thread ${Thread.currentThread().name}")
                     try { 
                         output.write(buffer.toByteArray()); 
@@ -294,7 +309,7 @@ class BleCentralService(private val context: Context) {
                         deferred.complete(false); 
                         return 
                     }
-                     deferred.complete(true)
+                      deferred.complete(true)
                     activeGattConnections.remove(deviceAddress)
                     gatt.disconnect(); gatt.close(); gattRef = null
                 }
