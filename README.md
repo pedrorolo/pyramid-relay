@@ -6,6 +6,8 @@ Share files and push updates to nearby devices via **BLE** (Bluetooth Low Energy
 
 **Example use case:** An event organizer broadcasts the programme schedule. Attendees subscribe via QR code. The QR code or share link acts as the key — it contains the file ID and public key needed to connect and read the content from any relaying peer. When the organizer pushes an updated schedule, all subscribed attendees receive the update — and continue relaying it to others who join later.
 
+**Community use case:** Families or communities in remote locations without internet can use Pyramid Relay as a local file sharing infrastructure — sharing documents, updates, and media directly between devices without needing any network connectivity.
+
 ## Features
 
 - **Offline-first** — works without internet, even in remote locations or crowded venues
