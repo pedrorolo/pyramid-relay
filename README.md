@@ -15,7 +15,7 @@ Share files and push updates to nearby devices via **BLE** (Bluetooth Low Energy
 - **Subscribe** via QR code or share link
 - **Relay** — subscribers automatically re-advertise received files to other peers, extending range organically
 - **Versioned updates** — push new versions of a broadcast; subscribers are notified and receive the update automatically
-- **Encrypted** — files are compressed and encrypted with hybrid RSA/AES-GCM before transfer
+- **Encrypted** — files are compressed and encrypted with hybrid RSA/AES-GCM before transmission
 
 ## Tech Stack
 
@@ -68,7 +68,7 @@ Requires a physical Android device. Connect via ADB before building.
 
 1. Pick a file from storage
 2. App generates an RSA keypair and signs the file metadata
-3. File is compressed, encrypted, and stored privately
+3. File is compressed and encrypted for transmission
 4. App advertises via BLE GATT in the background
 5. When a new version is published, all subscribers are notified and receive the update
 
@@ -88,7 +88,7 @@ The QR code/link functions as a key — it contains the file ID and public key n
 - **BLE GATT** with 16-bit service UUID: `00006d38-0000-1000-8000-00805f9b34fb`
 - **Metadata** read via GATT characteristic (152 bytes)
 - **File chunks** pushed via BLE notifications (512 bytes per chunk, 10ms delay)
-- **Hybrid encryption**: AES-256-GCM encrypts compressed payload; AES key wrapped with originator's RSA public key
+- **Hybrid encryption**: AES-256-GCM encrypts compressed payload for transmission; AES key wrapped with originator's RSA public key
 
 ## Permissions
 
