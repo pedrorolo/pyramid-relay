@@ -131,20 +131,25 @@ class SyncEngine(
                 kotlinx.coroutines.runBlocking {
                 try {
                     val broadcast = broadcastDao.getById(fileId)
-                    if (broadcast == null) {
+                    val subscription = subscriptionDao.getById(fileId)
+                    if (broadcast == null && subscription == null) {
                         null
                     } else {
                         val encrypted = File(fileService.getVersionDir(fileId, version), "file.encrypted")
                         if (encrypted.exists()) {
                             EventLog.log("ble", "Serving persisted encrypted envelope for ${fileId.takeLast(8)} v$version (${encrypted.length()}B)")
                         } else {
-                            val compressed = fileService.getCompressedFile(fileId, version).readBytes()
-                            val privateKey = broadcast.privateKeyAlias?.let { cryptoService.getPrivateKey(it) }
-                                ?: throw IllegalStateException("No private key for originator payload")
-                            encrypted.writeBytes(cryptoService.encryptCompressed(compressed, privateKey))
-                            EventLog.log("ble", "Created encrypted envelope for originator ${fileId.takeLast(8)} v$version (${encrypted.length()}B)")
+                            if (broadcast != null) {
+                                val compressed = fileService.getCompressedFile(fileId, version).readBytes()
+                                val privateKey = broadcast.privateKeyAlias?.let { cryptoService.getPrivateKey(it) }
+                                    ?: throw IllegalStateException("No private key for originator payload")
+                                encrypted.writeBytes(cryptoService.encryptCompressed(compressed, privateKey))
+                                EventLog.log("ble", "Created encrypted envelope for originator ${fileId.takeLast(8)} v$version (${encrypted.length()}B)")
+                            } else {
+                                null
+                            }
                         }
-                        encrypted.readBytes()
+                        if (encrypted.exists()) encrypted.readBytes() else null
                     }
                 } catch (e: Exception) {
                     EventLog.log("ble", "Failed to get compressed file for streaming: ${e.message}")
@@ -161,6 +166,7 @@ class SyncEngine(
             blePeripheralService.onTransferStart = { stopAdvertisingAndScanning() }
             blePeripheralService.onTransferEnd = {
                 EventLog.log("sync", "onTransferEnd fired, resuming advertising/scanning")
+                try { blePeripheralService.restartGattServer() } catch (_: Exception) {}
                 resumeAdvertisingAndScanning()
             }
             blePeripheralService.onStreamArmed = { stopAdvertisingAndScanning() }
@@ -234,9 +240,9 @@ class SyncEngine(
             // Periodic GATT server restart to fix META characteristic not found
             launch {
                 while (true) {
-                    kotlinx.coroutines.delay(600_000L)
-                    if (_downloadingFileIds.value.isNotEmpty() || activeUploadPeers.isNotEmpty()) {
-                        EventLog.log("ble", "Periodic GATT server restart skipped (transfer in progress)")
+                    kotlinx.coroutines.delay(300_000L)
+                    if (blePeripheralService.activeStreamingFileIds.value.isNotEmpty()) {
+                        EventLog.log("ble", "Periodic GATT server restart skipped (streaming in progress)")
                         continue
                     }
                     try {
@@ -521,6 +527,7 @@ class SyncEngine(
         downloadSemaphore.withPermit {
         peerLock(deviceAddress).withLock {
             _downloadingFileIds.value = _downloadingFileIds.value + subscription.fileId
+            EventLog.log("sync", "Added ${subscription.fileId.takeLast(8)} to downloadingFileIds (now: ${_downloadingFileIds.value.size})")
             activeDownloadPeers.add(deviceAddress)
             activeDownloadJobs[subscription.fileId] = currentCoroutineContext()[Job]!!
             downloadingFileDeviceMap[subscription.fileId] = deviceAddress
@@ -530,9 +537,12 @@ class SyncEngine(
         try {
             withTimeout(3_600_000L) {
             val fileIdHash = cryptoService.fileIdHash(subscription.fileId)
-            val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
-                EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting fetch"); return@withTimeout
+            val metaPayload = withTimeout(60_000L) {
+                bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
+                    EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting fetch"); return@withTimeout null
+                }
             }
+            if (metaPayload == null) return@withTimeout
             if (metaPayload.fileSize > MAX_FILE_SIZE) {
                 EventLog.log("sync", "File too large (compressed+encrypted ${metaPayload.fileSize}B > ${MAX_FILE_SIZE}B) - aborting")
                 return@withTimeout
@@ -640,18 +650,22 @@ class SyncEngine(
             downloadResult = true
             }
         } catch (e: TimeoutCancellationException) {
-            EventLog.log("sync", "Download timed out for ${subscription.fileId} after 10min (retry ${downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1}/$maxRetries)")
+            EventLog.log("sync", "Download timed out for ${subscription.fileId} (retry ${downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1}/$maxRetries)")
             downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching sub update ${subscription.fileId}", e)
             EventLog.log("sync", "Error fetching sub update ${subscription.fileId}: ${e.message}")
+        } finally {
+            if (!downloadResult) {
+                _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId
+                _downloadProgress.value = _downloadProgress.value - subscription.fileId
+                downloadingFileDeviceMap.remove(subscription.fileId)
+                activeDownloadJobs.remove(subscription.fileId)
+                EventLog.log("sync", "Removed ${subscription.fileId.takeLast(8)} from downloadingFileIds (finally, now: ${_downloadingFileIds.value.size})")
+                resumeAdvertisingAndScanning()
+            }
         }
         if (!downloadResult) {
-            _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId
-            _downloadProgress.value = _downloadProgress.value - subscription.fileId
-            downloadingFileDeviceMap.remove(subscription.fileId)
-            activeDownloadJobs.remove(subscription.fileId)
-            resumeAdvertisingAndScanning()
             return false
         }
         activeDownloadPeers.remove(deviceAddress)
@@ -659,6 +673,7 @@ class SyncEngine(
         _downloadProgress.value = _downloadProgress.value - subscription.fileId
         downloadingFileDeviceMap.remove(subscription.fileId)
         activeDownloadJobs.remove(subscription.fileId)
+        EventLog.log("sync", "Removed ${subscription.fileId.takeLast(8)} from downloadingFileIds (now: ${_downloadingFileIds.value.size})")
         resumeAdvertisingAndScanning()
         return true
         } // peerLock
@@ -682,6 +697,8 @@ class SyncEngine(
             bleCentralService.disconnectDevice(deviceAddress)
             EventLog.log("sync", "Disconnected from ${deviceAddress.takeLast(5)} for cancelled transfer ${fileId.takeLast(8)}")
         }
+        _downloadingFileIds.value = _downloadingFileIds.value - fileId
+        _downloadProgress.value = _downloadProgress.value - fileId
         blePeripheralService.stopStreaming(fileId)
         resumeAdvertisingAndScanning()
     }

@@ -111,7 +111,7 @@ class BleCentralService(private val context: Context) {
         // Samsung BLE connections frequently fail on the first attempt (status !=
         // GATT_SUCCESS). Retry a few times before giving up.
         var lastStatus = -1
-        val fibDelays = listOf(1500L, 1500L, 3000L, 4500L, 7500L) // Fibonacci-based: F(n) * 1500ms
+        val retryDelayMs = 1500L
         repeat(5) { attempt ->
             val attemptNo = attempt + 1
             val deferred = CompletableDeferred<BleMetaPayload?>()
@@ -140,9 +140,10 @@ class BleCentralService(private val context: Context) {
                     if (hexHash != null) {
                         val streamChar = gatt.getService(SERVICE_UUID)?.getCharacteristic(STREAM_UUID)
                         if (streamChar != null) {
-                            val submit = gatt.writeCharacteristic(streamChar, "SELECT $hexHash".toByteArray(Charsets.UTF_8), android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
-                            if (submit == BluetoothGatt.GATT_SUCCESS) return
-                            EventLog.log("ble", "SELECT write failed ($submit), reading META directly")
+                            val submit = gatt.writeCharacteristic(streamChar, "SELECT $hexHash".toByteArray(Charsets.UTF_8), android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
+                            if (submit != BluetoothGatt.GATT_SUCCESS) {
+                                EventLog.log("ble", "SELECT write failed ($submit), reading META directly")
+                            }
                         }
                     }
                     val metaChar = gatt.getService(SERVICE_UUID)?.getCharacteristic(META_UUID)
@@ -174,7 +175,7 @@ class BleCentralService(private val context: Context) {
             EventLog.log("ble", "GATT connect to ${deviceAddress.takeLast(5)} for meta read (attempt $attemptNo)")
             val result = try { withTimeout(90_000L) { deferred.await() } } catch (e: Exception) { Log.e(TAG, "Timeout reading meta from $deviceAddress", e); EventLog.log("ble", "Meta read TIMED OUT from ${deviceAddress.takeLast(5)} (attempt $attemptNo)"); null }
             if (result != null) return result
-            if (attempt < fibDelays.size) kotlinx.coroutines.delay(fibDelays[attempt])
+            if (attempt < 4) kotlinx.coroutines.delay(retryDelayMs)
         }
         EventLog.log("ble", "Meta read FAILED after 5 attempts for ${deviceAddress.takeLast(5)} (last status=$lastStatus)")
         return null
