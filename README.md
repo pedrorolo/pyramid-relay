@@ -7,7 +7,6 @@ Share files and push updates to nearby devices via **BLE** (Bluetooth Low Energy
 **Use cases:**
 - An event organizer broadcasts the programme schedule — attendees subscribe via QR code, and when the organizer pushes an update, all subscribers receive it and continue relaying it to others who join later.
 - Families or communities in remote locations without internet can use Pyramid Relay as a local file sharing infrastructure, sharing documents, updates, and media directly between devices.
-- The QR code or share link acts as the key — it contains the file ID and public key needed to connect and read the content from any relaying peer.
 
 ## Features
 
@@ -79,6 +78,8 @@ Requires a physical Android device. Connect via ADB before building.
 2. App connects via BLE GATT and reads file metadata
 3. If a newer version is available, the file is downloaded and verified
 4. File is saved and automatically re-advertised to other peers (relay mode)
+
+The QR code/link functions as a key — it contains the file ID and public key needed to connect and read the content from any relaying peer.
 
 ### Transfer Protocol
 
