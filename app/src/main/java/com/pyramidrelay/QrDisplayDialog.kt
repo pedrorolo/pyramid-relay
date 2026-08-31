@@ -24,11 +24,12 @@ import com.journeyapps.barcodescanner.BarcodeEncoder
 fun QrDisplayDialog(
     fileId: String,
     pk: String,
-    relayName: String,
+    relayName: String?,
     version: Int,
     onDismiss: () -> Unit
 ) {
-    val uri = "pyramidrelay://subscribe?fileId=$fileId&pk=$pk&relayName=$relayName&v=$version"
+    val relayNameParam = relayName ?: ""
+    val uri = "pyramidrelay://subscribe?fileId=$fileId&pk=$pk&relayName=$relayNameParam&v=$version"
     val bitmap = remember(uri) {
         try {
             BarcodeEncoder().encodeBitmap(uri, BarcodeFormat.QR_CODE, 400, 400)
@@ -45,7 +46,11 @@ fun QrDisplayDialog(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Image(bitmap = bitmap.asImageBitmap(), contentDescription = "QR Code", modifier = Modifier.size(250.dp))
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("v$version | #$relayName", modifier = Modifier.padding(top = 8.dp))
+                if (relayName != null) {
+                    Text("v$version | #$relayName", modifier = Modifier.padding(top = 8.dp))
+                } else {
+                    Text("v$version", modifier = Modifier.padding(top = 8.dp))
+                }
                 Text("Scan to subscribe", modifier = Modifier.padding(top = 4.dp))
             }
         },

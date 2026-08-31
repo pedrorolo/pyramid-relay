@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 set -euo pipefail
-exec "${XDG_CACHE_HOME:-$HOME/.cache}/opencode/kotlin-language-server/1.3.13/server/server/bin/kotlin-language-server" "$@"
+exec "${XDG_CACHE_HOME:-$HOME/.cache}/opencode/kotlin-lsp/kotlin-server-262.9593.0/bin/intellij-server" "$@"

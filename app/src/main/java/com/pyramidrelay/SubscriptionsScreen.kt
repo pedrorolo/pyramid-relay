@@ -77,8 +77,7 @@ class SubscriptionsViewModel(
     private val broadcastDao: BroadcastDao,
     private val fileService: FileService,
     private val cryptoService: CryptoService,
-    private val syncEngine: SyncEngine? = null,
-    private val notificationService: NotificationService? = null
+    private val syncEngine: SyncEngine? = null
 ) : ViewModel() {
     private val _subscriptions = MutableStateFlow<List<SubscriptionEntity>>(emptyList())
     val subscriptions: StateFlow<List<SubscriptionEntity>> = _subscriptions.asStateFlow()
@@ -101,7 +100,7 @@ class SubscriptionsViewModel(
     }
 
     private suspend fun refresh() {
-        _subscriptions.value = subscriptionDao.getAll().filter { !it.hidden }
+        _subscriptions.value = subscriptionDao.getAll()
     }
 
     fun addSubscription(fileId: String, publicKeyBase64: String, relayName: String?) {
@@ -114,36 +113,12 @@ class SubscriptionsViewModel(
                 return@launch
             }
             try {
-                // Check if a hidden subscription already exists for this file
-                val fileIdHash = cryptoService.fileIdHash(fileId).joinToString("") { "%02x".format(it) }
-                val existingHidden = subscriptionDao.getById(fileIdHash)
-                if (existingHidden != null && existingHidden.hidden) {
-                    val hadFile = existingHidden.localVersion != null
-                    val prevVersion = existingHidden.localVersion ?: 0
-                    subscriptionDao.upsert(
-                        SubscriptionEntity(
-                            fileId, publicKeyBase64, existingHidden.fileName, relayName, false,
-                            existingHidden.localVersion, existingHidden.localUri,
-                            existingHidden.subscribedAt, existingHidden.lastSeenVersion,
-                            existingHidden.lastSeenAt, existingHidden.lastNotifiedVersion
-                        )
+                subscriptionDao.upsert(
+                    SubscriptionEntity(
+                        fileId, publicKeyBase64, null, relayName, null, null,
+                        System.currentTimeMillis(), null, null, null
                     )
-                    subscriptionDao.delete(fileIdHash)
-                    EventLog.log("sub", "Converted hidden subscription to visible: ${relayName ?: fileId.takeLast(8)}")
-                    if (hadFile) {
-                        val name = relayName ?: fileId.takeLast(8)
-                        notificationService?.showUpdateNotification(name, fileId, prevVersion, prevVersion)
-                        subscriptionDao.updateLastNotified(fileId, prevVersion)
-                        EventLog.log("sub", "Notified: File \"$name\" retrieved (was hidden)")
-                    }
-                } else {
-                    subscriptionDao.upsert(
-                        SubscriptionEntity(
-                            fileId, publicKeyBase64, null, relayName, false, null, null,
-                            System.currentTimeMillis(), null, null, null
-                        )
-                    )
-                }
+                )
                 syncEngine?.clearDiscoveryStateForFile(fileId)
                 EventLog.log("sub", "Subscribed to \"${relayName ?: fileId.takeLast(8)}\" - listening for new versions")
             } catch (e: Exception) {
@@ -158,42 +133,16 @@ class SubscriptionsViewModel(
                 "sub",
                 "Deleting subscription \"${subscription.relayName ?: subscription.fileId.takeLast(8)}\" (local v${subscription.localVersion})"
             )
-            val visibleSubCount = subscriptionDao.getAll().count { !it.hidden } - 1 // excluding this one
-            val hiddenCount = subscriptionDao.getHiddenCount()
-            val visibleBroadcastCount = broadcastDao.getAll().count { it.role == Role.ORIGINATOR }
-            val maxHidden = visibleSubCount + visibleBroadcastCount + 1
-            val canConvertToHidden = hiddenCount < maxHidden
             syncEngine?.cancelTransfer(subscription.fileId)
             syncEngine?.clearDiscoveryStateForFile(subscription.fileId)
             syncEngine?.stopAdvertisingForFile(subscription.fileId)
-            if (canConvertToHidden && subscription.localVersion != null) {
-                // Convert to hidden instead of deleting
-                subscriptionDao.upsert(subscription.copy(hidden = true))
-                EventLog.log("sub", "Converted visible subscription to hidden: ${subscription.fileId.takeLast(8)}")
-            } else {
-                fileService.deleteAll(subscription.fileId)
-                subscriptionDao.delete(subscription.fileId)
-                broadcastDao.delete(subscription.fileId)
-                EventLog.log("sub", "Deleted subscription ${subscription.fileId.takeLast(8)} - relay stopped, files removed")
-            }
-            // Clean up hidden subscriptions if cap is exceeded
-            cleanupHiddenSubscriptions()
-        }
-    }
-
-    private suspend fun cleanupHiddenSubscriptions() {
-        val visibleSubCount = subscriptionDao.getAll().count { !it.hidden }
-        val visibleBroadcastCount = broadcastDao.getAll().count { it.role == Role.ORIGINATOR }
-        val maxHidden = visibleSubCount + visibleBroadcastCount + 1
-        var hiddenCount = subscriptionDao.getHiddenCount()
-        while (hiddenCount > maxHidden) {
-            val oldest = subscriptionDao.getOldestHidden()
-            if (oldest == null) break
-            syncEngine?.stopAdvertisingForFile(oldest.fileId)
-            fileService.deleteAll(oldest.fileId)
-            subscriptionDao.delete(oldest.fileId)
-            EventLog.log("sub", "Cleaned up hidden subscription: ${oldest.fileId.takeLast(8)}")
-            hiddenCount = subscriptionDao.getHiddenCount()
+            fileService.deleteAll(subscription.fileId)
+            subscriptionDao.delete(subscription.fileId)
+            broadcastDao.delete(subscription.fileId)
+            EventLog.log(
+                "sub",
+                "Deleted subscription ${subscription.fileId.takeLast(8)} - relay stopped, files removed"
+            )
         }
     }
 }
@@ -208,8 +157,7 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
             app.broadcastDao,
             app.fileService,
             app.cryptoService,
-            app.syncEngine,
-            app.notificationService
+            app.syncEngine
         )
     }
     val subscriptions by viewModel.subscriptions.collectAsState()

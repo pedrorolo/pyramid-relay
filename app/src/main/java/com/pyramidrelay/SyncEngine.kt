@@ -56,7 +56,6 @@ class SyncEngine(
     // do not probe that device again for PROBE_COOLDOWN_MS.
     private val lastProbeAt = ConcurrentHashMap<String, Long>()
     private val advertisedFiles = ConcurrentHashMap.newKeySet<String>()
-    private val hiddenServiceData = ConcurrentHashMap<String, ByteArray>()
     private val peerLocks = ConcurrentHashMap<String, Mutex>()
     private val activeDownloadPeers = ConcurrentHashMap.newKeySet<String>()
     private val activeUploadPeers = ConcurrentHashMap.newKeySet<String>()
@@ -396,30 +395,12 @@ class SyncEngine(
             EventLog.log("scan", "Matched subscription \"${subscription.fileName ?: subscription.fileId}\" -> fetching v$version")
             return fetchAndUpdateSubscription(subscription, version, deviceAddress)
         }
-        // No match: check if we already have a hidden subscription for this file
-        val allSubs = subscriptionDao.getAll()
-        val existingHidden = allSubs.firstOrNull { s -> s.hidden && cryptoService.fileIdHash(s.fileId).contentEquals(fileIdHash) && cryptoService.keyId(s.publicKey).contentEquals(keyId) }
-        if (existingHidden != null) {
-            val localVer = existingHidden.localVersion
-            if (localVer != null && version <= localVer) {
-                EventLog.log("scan", "Hidden relay ${existingHidden.fileId.takeLast(8)} already at v$localVer - adv v$version not newer")
-                return false
-            }
-            EventLog.log("scan", "Hidden relay ${existingHidden.fileId.takeLast(8)} updating v$localVer -> v$version")
-            return fetchAndUpdateHidden(existingHidden, version, deviceAddress)
-        }
-        // Enforce cap: max hidden = visibleSubscriptions + visibleBroadcasts + 1
-        val visibleSubCount = allSubs.count { !it.hidden }
-        val hiddenCount = allSubs.count { it.hidden }
-        val visibleBroadcastCount = broadcastDao.getAll().count { it.role == Role.ORIGINATOR }
-        val maxHidden = visibleSubCount + visibleBroadcastCount + 1
-        if (hiddenCount >= maxHidden) {
-            EventLog.log("scan", "Hidden subscription cap reached ($hiddenCount >= $maxHidden) - ignoring new advertisement")
-            return false
-        }
-        // Create hidden subscription and download in relay mode
-        EventLog.log("scan", "Creating hidden subscription for hash=${fileIdHash.joinToString("") { b -> "%02x".format(b) }.take(12)} v$version")
-        return createHiddenAndFetch(fileIdHash, keyId, version, deviceAddress)
+        // Diagnostic detail: show why nothing matched
+        val knownIds = (broadcasts.map { cryptoService.fileIdHash(it.fileId) } + subscriptions.map { cryptoService.fileIdHash(it.fileId) })
+            .joinToString(",") { it.joinToString("") { b -> "%02x".format(b) }.take(12) }
+        val knownKeys = subscriptions.joinToString(",") { cryptoService.keyId(it.publicKey).joinToString("") { b -> "%02x".format(b) }.take(8) }
+        EventLog.log("scan", "Adv hash=${fileIdHash.joinToString("") { b -> "%02x".format(b) }.take(12)} keyId=${keyId.joinToString("") { b -> "%02x".format(b) }.take(8)} | mine: ids=[$knownIds] keys=[$knownKeys] - NO MATCH")
+        return false
     }
 
     /** Relay keeping its own copy current: verify meta, pull bytes, re-sign, update DB. */
@@ -451,7 +432,7 @@ class SyncEngine(
                 EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting relay update"); return false
             }
             if (metaPayload.fileSize > MAX_FILE_SIZE) {
-                EventLog.log("sync", "Relay file too large to download (${metaPayload.fileSize}B > ${MAX_FILE_SIZE}B) - aborting")
+                EventLog.log("sync", "Relay file too large (compressed+encrypted ${metaPayload.fileSize}B > ${MAX_FILE_SIZE}B) - aborting")
                 return false
             }
             // Use the public key from the broadcast entity (originator), not from META
@@ -553,7 +534,7 @@ class SyncEngine(
                 EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting fetch"); return@withTimeout
             }
             if (metaPayload.fileSize > MAX_FILE_SIZE) {
-                EventLog.log("sync", "File too large to download (${metaPayload.fileSize}B > ${MAX_FILE_SIZE}B) - aborting")
+                EventLog.log("sync", "File too large (compressed+encrypted ${metaPayload.fileSize}B > ${MAX_FILE_SIZE}B) - aborting")
                 return@withTimeout
             }
             // Use the public key from the subscription (obtained from QR code/link), not from META
@@ -680,87 +661,6 @@ class SyncEngine(
         activeDownloadJobs.remove(subscription.fileId)
         resumeAdvertisingAndScanning()
         return true
-        } // peerLock
-        }
-    }
-
-    private suspend fun createHiddenAndFetch(fileIdHash: ByteArray, keyId: ByteArray, version: Int, deviceAddress: String): Boolean {
-        val hiddenFileId = fileIdHash.joinToString("") { "%02x".format(it) }
-        val serviceData = ByteArray(14)
-        fileIdHash.copyInto(serviceData, 0)
-        serviceData[6] = ((version ushr 24) and 0xFF).toByte(); serviceData[7] = ((version ushr 16) and 0xFF).toByte()
-        serviceData[8] = ((version ushr 8) and 0xFF).toByte(); serviceData[9] = (version and 0xFF).toByte()
-        keyId.copyInto(serviceData, 10)
-        hiddenServiceData[hiddenFileId] = serviceData
-        // Use a placeholder publicKey — will be updated if user subscribes
-        val placeholderPk = Base64.getEncoder().encodeToString(ByteArray(32) { 0 })
-        subscriptionDao.upsert(SubscriptionEntity(hiddenFileId, placeholderPk, null, "hidden-$hiddenFileId", true, null, null, System.currentTimeMillis(), null, null, null))
-        EventLog.log("sync", "Hidden subscription created for $hiddenFileId v$version")
-        val sub = subscriptionDao.getById(hiddenFileId) ?: return false
-        return fetchAndUpdateHidden(sub, version, deviceAddress)
-    }
-
-    private suspend fun fetchAndUpdateHidden(subscription: SubscriptionEntity, newVersion: Int, deviceAddress: String): Boolean {
-        downloadMutex.withLock {
-            if (_downloadingFileIds.value.contains(subscription.fileId)) return false
-        }
-        while (activeUploadPeers.contains(deviceAddress)) { kotlinx.coroutines.delay(100) }
-        downloadSemaphore.withPermit {
-        peerLock(deviceAddress).withLock {
-            _downloadingFileIds.value = _downloadingFileIds.value + subscription.fileId
-            activeDownloadPeers.add(deviceAddress)
-            downloadingFileDeviceMap[subscription.fileId] = deviceAddress
-            stopAdvertisingAndScanning()
-            EventLog.log("sync", "Hidden download started for ${subscription.fileId.takeLast(8)} v$newVersion")
-        var downloadResult = false
-        try {
-            val fileIdHash = subscription.fileId.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-            val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
-                EventLog.log("sync", "No meta payload for hidden ${subscription.fileId.takeLast(8)}"); return false
-            }
-            if (metaPayload.fileSize > MAX_FILE_SIZE) {
-                EventLog.log("sync", "Hidden file too large to download (${metaPayload.fileSize}B > ${MAX_FILE_SIZE}B) - aborting")
-                return false
-            }
-            val tmpFile = fileService.getTmpFile(subscription.fileId, newVersion)
-            tmpFile.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IllegalStateException("Cannot create dir") }
-            val transferred = try {
-                tmpFile.outputStream().use { output ->
-                    bleCentralService.fetchFile(deviceAddress, newVersion, metaPayload.fileSize, output) { _, _ -> }
-                }
-            } catch (e: Exception) { EventLog.log("ble", "fetchFile error: ${e.message}"); false }
-            if (!transferred) { tmpFile.delete(); return false }
-            if (!tmpFile.isFile || tmpFile.length() != metaPayload.fileSize) {
-                EventLog.log("sync", "Hidden size mismatch"); tmpFile.delete(); return false
-            }
-            val encrypted = tmpFile.readBytes()
-            val envelopeFile = File(fileService.getVersionDir(subscription.fileId, newVersion), "file.encrypted")
-            envelopeFile.parentFile?.mkdirs()
-            envelopeFile.writeBytes(encrypted)
-            tmpFile.delete()
-            // Store the encrypted file for relaying — do NOT decrypt
-            val resolvedFileName = metaPayload.fileName.takeIf { it.isNotBlank() } ?: subscription.fileName
-            subscriptionDao.updateReceived(subscription.fileId, newVersion, envelopeFile.absolutePath, newVersion, System.currentTimeMillis(), resolvedFileName)
-            EventLog.log("sync", "Hidden relay stored ${subscription.fileId.takeLast(8)} v$newVersion (${encrypted.size}B)")
-            // Advertise for relay
-            val serviceData = hiddenServiceData[subscription.fileId]
-            if (serviceData != null) {
-                blePeripheralService.startAdvertising(subscription.fileId, serviceData)
-                advertisedFiles.add(subscription.fileId)
-                EventLog.log("adv", "Now relaying hidden ${subscription.fileId.takeLast(8)} v$newVersion")
-            }
-            downloadResult = true
-        } catch (e: Exception) {
-            Log.e(TAG, "Error fetching hidden ${subscription.fileId}", e)
-            EventLog.log("sync", "Error fetching hidden: ${e.message}")
-        } finally {
-            activeDownloadPeers.remove(deviceAddress)
-            _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId
-            _downloadProgress.value = _downloadProgress.value - subscription.fileId
-            downloadingFileDeviceMap.remove(subscription.fileId)
-            resumeAdvertisingAndScanning()
-        }
-        return downloadResult
         } // peerLock
         }
     }

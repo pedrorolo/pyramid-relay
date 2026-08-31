@@ -5,7 +5,7 @@ enum class Role { ORIGINATOR, RELAY }
 data class BroadcastEntity(
     val fileId: String,
     val fileName: String,
-    val relayName: String = fileName,
+    val relayName: String? = null,
     val mimeType: String,
     val internalUri: String,
     val fileHash: String,

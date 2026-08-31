@@ -21,7 +21,6 @@ import androidx.compose.ui.unit.dp
 fun SettingsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val app = context.applicationContext as P2PBroadcasterApp
-    var relayNonSubscribed by remember { mutableStateOf(app.settingsStore.relayNonSubscribed) }
     var showPersistentNotification by remember { mutableStateOf(app.settingsStore.showPersistentNotification) }
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
@@ -31,22 +30,6 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         )
         Column(
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Switch(
-                checked = relayNonSubscribed,
-                onCheckedChange = { newValue ->
-                    relayNonSubscribed = newValue
-                    app.settingsStore.relayNonSubscribed = newValue
-                }
-            )
-            Text(
-                text = "Relay non-subscribed files",
-                style = MaterialTheme.typography.bodyMedium
-            )
-        }
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Switch(

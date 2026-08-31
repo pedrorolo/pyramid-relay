@@ -134,6 +134,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startSyncService() {
+        val settingsStore = SettingsStore(this)
+        if (!settingsStore.showPersistentNotification) return
         try {
             ContextCompat.startForegroundService(this, Intent(this, BleForegroundService::class.java))
         } catch (e: Exception) {
@@ -277,14 +279,14 @@ fun MainScreen(intent: Intent? = null) {
                 arguments = listOf(
                     navArgument("fileId") { type = NavType.StringType },
                     navArgument("pk") { type = NavType.StringType },
-                    navArgument("relayName") { type = NavType.StringType },
+                    navArgument("relayName") { type = NavType.StringType; nullable = true; defaultValue = null },
                     navArgument("v") { type = NavType.IntType }
                 )
             ) { backStackEntry ->
                 QrDisplayDialog(
                     fileId = backStackEntry.arguments?.getString("fileId") ?: "",
                     pk = backStackEntry.arguments?.getString("pk") ?: "",
-                    relayName = backStackEntry.arguments?.getString("relayName") ?: "",
+                    relayName = backStackEntry.arguments?.getString("relayName"),
                     version = backStackEntry.arguments?.getInt("v") ?: 1,
                     onDismiss = { navController.popBackStack() }
                 )

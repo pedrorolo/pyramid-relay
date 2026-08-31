@@ -5,7 +5,6 @@ data class SubscriptionEntity(
     val publicKey: String,
     val fileName: String? = null,
     val relayName: String? = null,
-    val hidden: Boolean = false,
     val localVersion: Int? = null,
     val localUri: String? = null,
     val subscribedAt: Long,

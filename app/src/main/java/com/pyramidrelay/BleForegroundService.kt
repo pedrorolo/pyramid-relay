@@ -22,6 +22,7 @@ class BleForegroundService : Service() {
 
     private var syncEngine: SyncEngine? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var persistentNotification: Boolean = true
     private val notificationService by lazy { NotificationService(this) }
     private val notificationManager by lazy { getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager }
     private val handler = Handler(Looper.getMainLooper())
@@ -39,12 +40,15 @@ class BleForegroundService : Service() {
         super.onCreate()
         val app = application as P2PBroadcasterApp
         syncEngine = app.syncEngine
+        persistentNotification = app.settingsStore.showPersistentNotification
         rePostNotification()
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "com.pyramidrelay:ble").apply {
             acquire()
         }
-        handler.post(notificationChecker)
+        if (persistentNotification) {
+            handler.post(notificationChecker)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -75,7 +79,7 @@ class BleForegroundService : Service() {
 
     private fun rePostNotification() {
         try {
-            notificationService.createForegroundNotification()?.let {
+            notificationService.createForegroundNotification(persistentNotification)?.let {
                 startForeground(NOTIFICATION_ID, it, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
             }
         } catch (e: Exception) {

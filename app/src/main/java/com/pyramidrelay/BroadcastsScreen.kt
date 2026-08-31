@@ -39,6 +39,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -72,6 +73,8 @@ class BroadcastsViewModel(
     val downloadProgress: StateFlow<Map<String, Float>> get() = syncEngine?.downloadProgress ?: MutableStateFlow(emptyMap())
     val streamingProgress: StateFlow<Map<String, Float>> get() = syncEngine?.streamingProgress ?: MutableStateFlow(emptyMap())
     val currentAdvertisingFileId: StateFlow<String?> get() = syncEngine?.currentAdvertisingFileId ?: MutableStateFlow(null)
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
 
     init {
         viewModelScope.launch { refresh() }
@@ -84,7 +87,7 @@ class BroadcastsViewModel(
         _broadcasts.value = broadcastDao.getAll().filter { it.role == Role.ORIGINATOR }
     }
 
-    fun importAndBroadcast(uri: Uri, context: android.content.Context, relayName: String) {
+    fun importAndBroadcast(uri: Uri, context: android.content.Context, relayName: String?) {
         viewModelScope.launch {
             val fileId = UUID.randomUUID().toString()
             val keyPair = cryptoService.generateRsaKeyPair()
@@ -99,13 +102,19 @@ class BroadcastsViewModel(
             val version = 1
             val vDir = fileService.getVersionDir(fileId, version); vDir.mkdirs()
             val file = fileService.getFile(fileId, version); file.writeBytes(fileBytes)
-            val hashHex = cryptoService.sha256Hex(fileBytes)
+            val compressedFile = fileService.getCompressedFile(fileId, version)
+            if (compressedFile.length() > SyncEngine.MAX_FILE_SIZE) {
+                file.delete(); compressedFile.delete(); vDir.deleteRecursively()
+                EventLog.log("adv", "Broadcast rejected: compressed ${compressedFile.length()}B exceeds ${SyncEngine.MAX_FILE_SIZE}B limit")
+                _error.value = "Compressed+encrypted file too large (max ${SyncEngine.MAX_FILE_SIZE / 1024 / 1024} MB)"
+                return@launch
+            }
             val hashStr = Base64.getEncoder().encodeToString(cryptoService.sha256(fileBytes))
             val signatureStr = ""
             broadcastDao.upsert(
                 BroadcastEntity(
                     fileId, fileName, relayName, mimeType, file.absolutePath, hashStr,
-                    fileBytes.size.toLong(), fileBytes.size.toLong(), version, publicKeyStr, alias, signatureStr,
+                    fileBytes.size.toLong(), compressedFile.length(), version, publicKeyStr, alias, signatureStr,
                     Role.ORIGINATOR, System.currentTimeMillis(), System.currentTimeMillis()
                 )
             )
@@ -164,11 +173,13 @@ class BroadcastsViewModel(
             EventLog.log("adv", "updateBroadcast: DONE - \"$effectiveFileName\" updated to v$newVersion")
         }
     }
+
+    fun clearError() { _error.value = null }
 }
 
 @Composable
 fun BroadcastsScreen(
-    onShareQr: (fileId: String, pk: String, relayName: String, version: Int) -> Unit = { _, _, _, _ -> }
+    onShareQr: (fileId: String, pk: String, relayName: String?, version: Int) -> Unit = { _, _, _, _ -> }
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as P2PBroadcasterApp
@@ -181,8 +192,32 @@ fun BroadcastsScreen(
     val bluetoothAvailable by app.syncEngine.isBluetoothAvailable.collectAsState()
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
     var showRelayNameDialog by remember { mutableStateOf(false) }
+    var showSizeError by remember { mutableStateOf(false) }
     val pickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        uri?.let { pendingUri = it; showRelayNameDialog = true }
+        if (uri != null) {
+            val cursor = context.contentResolver.query(uri, null, null, null, null)
+            val size = cursor?.use { c ->
+                val sizeIdx = c.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                if (sizeIdx >= 0 && c.moveToFirst()) c.getLong(sizeIdx) else 0L
+            } ?: 0L
+            if (size > SyncEngine.MAX_FILE_SIZE) {
+                showSizeError = true
+            } else {
+                pendingUri = uri
+                showRelayNameDialog = true
+            }
+        }
+    }
+    val error by viewModel.error.collectAsState()
+    LaunchedEffect(error) { if (error != null) showSizeError = true }
+    if (showSizeError) {
+        val errorMsg = error ?: "Maximum compressed+encrypted file size is ${SyncEngine.MAX_FILE_SIZE / 1024 / 1024} MB."
+        AlertDialog(
+            onDismissRequest = { showSizeError = false; viewModel.clearError() },
+            title = { Text("File too large") },
+            text = { Text(errorMsg) },
+            confirmButton = { TextButton(onClick = { showSizeError = false; viewModel.clearError() }) { Text("OK") } }
+        )
     }
     var updateTarget by remember { mutableStateOf<BroadcastEntity?>(null) }
     var showUpdateConfirm by remember { mutableStateOf<BroadcastEntity?>(null) }
@@ -259,7 +294,7 @@ fun BroadcastsScreen(
 
                         Row(modifier = Modifier.fillMaxWidth().padding(12.dp).height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("#${broadcast.relayName}", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                broadcast.relayName?.let { Text("#$it", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
                                 Text(broadcast.fileName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.clickable { saveAndOpen() })
                                 val compressedText = if (broadcast.compressedSize in 1 until broadcast.fileSize) " (compressed ${formatSize(broadcast.compressedSize)})" else ""
                                 Text("v${broadcast.version} | ${formatSize(broadcast.fileSize)}$compressedText", style = MaterialTheme.typography.bodySmall)
@@ -361,13 +396,19 @@ fun BroadcastsScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    showRelayNameDialog = false
-                    pendingUri?.let { viewModel.importAndBroadcast(it, context, relayNameText) }
-                    pendingUri = null
-                }, enabled = relayNameText.isNotBlank()) { Text("Broadcast") }
-            },
-            dismissButton = { TextButton(onClick = { showRelayNameDialog = false; pendingUri = null }) { Text("Cancel") } }
+                Row {
+                    TextButton(onClick = {
+                        showRelayNameDialog = false
+                        pendingUri?.let { viewModel.importAndBroadcast(it, context, null) }
+                        pendingUri = null
+                    }) { Text("Skip") }
+                    TextButton(onClick = {
+                        showRelayNameDialog = false
+                        pendingUri?.let { viewModel.importAndBroadcast(it, context, relayNameText) }
+                        pendingUri = null
+                    }) { Text("Continue") }
+                }
+            }
         )
     }
 }
