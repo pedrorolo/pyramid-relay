@@ -14,14 +14,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
-class AppDatabase(context: android.content.Context) : SQLiteOpenHelper(context, "pyramidrelay.db", null, 3) {
+class AppDatabase(context: android.content.Context) : SQLiteOpenHelper(context, "pyramidrelay.db", null, 4) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""
             CREATE TABLE broadcasts (
                 fileId TEXT PRIMARY KEY,
                 fileName TEXT NOT NULL,
-                relayName TEXT NOT NULL,
+                relayName TEXT,
                 mimeType TEXT NOT NULL,
                 internalUri TEXT NOT NULL,
                 fileHash TEXT NOT NULL,
@@ -53,23 +53,9 @@ class AppDatabase(context: android.content.Context) : SQLiteOpenHelper(context, 
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        if (oldVersion < 2) {
-            val cursor = db.rawQuery("PRAGMA table_info(broadcasts)", null)
-            val hasCompressedSize = cursor.use {
-                val nameIndex = it.getColumnIndex("name")
-                while (it.moveToNext()) {
-                    if (nameIndex >= 0 && it.getString(nameIndex) == "compressedSize") return@use true
-                }
-                false
-            }
-            if (!hasCompressedSize) {
-                db.execSQL("ALTER TABLE broadcasts ADD COLUMN compressedSize INTEGER NOT NULL DEFAULT 0")
-            }
-        }
-        if (oldVersion < 3) {
-            // Signature is retained as an empty compatibility column for existing databases.
-            // New transfers use authenticated encryption instead.
-        }
+        db.execSQL("DROP TABLE IF EXISTS broadcasts")
+        db.execSQL("DROP TABLE IF EXISTS subscriptions")
+        onCreate(db)
     }
 }
 

@@ -28,8 +28,8 @@ fun QrDisplayDialog(
     version: Int,
     onDismiss: () -> Unit
 ) {
-    val relayNameParam = relayName ?: ""
-    val uri = "pyramidrelay://subscribe?fileId=$fileId&pk=$pk&relayName=$relayNameParam&v=$version"
+    val nameParam = relayName?.let { "relayName=$it" } ?: "fileName="
+    val uri = "pyramidrelay://subscribe?fileId=$fileId&pk=$pk&$nameParam&v=$version"
     val bitmap = remember(uri) {
         try {
             BarcodeEncoder().encodeBitmap(uri, BarcodeFormat.QR_CODE, 400, 400)

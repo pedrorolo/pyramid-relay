@@ -113,7 +113,7 @@ class BroadcastsViewModel(
             val signatureStr = ""
             broadcastDao.upsert(
                 BroadcastEntity(
-                    fileId, fileName, relayName, mimeType, file.absolutePath, hashStr,
+                    fileId, fileName, relayName?.ifBlank { null }, mimeType, file.absolutePath, hashStr,
                     fileBytes.size.toLong(), compressedFile.length(), version, publicKeyStr, alias, signatureStr,
                     Role.ORIGINATOR, System.currentTimeMillis(), System.currentTimeMillis()
                 )
@@ -315,19 +315,19 @@ fun BroadcastsScreen(
                                     IconButton(onClick = {
                                         val pkBytes = try { Base64.getDecoder().decode(broadcast.publicKey) } catch (e: Exception) { Base64.getUrlDecoder().decode(broadcast.publicKey) }
                                         val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
-                                        val relayNameEnc = java.net.URLEncoder.encode(broadcast.relayName, "UTF-8")
-                                        val link = "pyramidrelay://subscribe?fileId=${broadcast.fileId}&pk=$pkUrl&relayName=$relayNameEnc&v=${broadcast.version}"
+                                        onShareQr(broadcast.fileId, pkUrl, broadcast.relayName, broadcast.version)
+                                    }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.QrCode, contentDescription = "Share QR", modifier = Modifier.size(20.dp)) }
+                                    IconButton(onClick = {
+                                        val pkBytes = try { Base64.getDecoder().decode(broadcast.publicKey) } catch (e: Exception) { Base64.getUrlDecoder().decode(broadcast.publicKey) }
+                                        val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
+                                        val nameParam = broadcast.relayName?.let { "relayName=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: "fileName=${java.net.URLEncoder.encode(broadcast.fileName, "UTF-8")}"
+                                        val link = "pyramidrelay://subscribe?fileId=${broadcast.fileId}&pk=$pkUrl&$nameParam&v=${broadcast.version}"
                                         val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                             type = "text/plain"
                                             putExtra(Intent.EXTRA_TEXT, link)
                                         }
                                         context.startActivity(Intent.createChooser(shareIntent, "Share link"))
                                     }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Share, contentDescription = "Share Link", modifier = Modifier.size(20.dp)) }
-                                    IconButton(onClick = {
-                                        val pkBytes = try { Base64.getDecoder().decode(broadcast.publicKey) } catch (e: Exception) { Base64.getUrlDecoder().decode(broadcast.publicKey) }
-                                        val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
-                                        onShareQr(broadcast.fileId, pkUrl, broadcast.relayName, broadcast.version)
-                                    }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.QrCode, contentDescription = "Share QR", modifier = Modifier.size(20.dp)) }
                                     IconButton(onClick = { showUpdateConfirm = broadcast }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Refresh, contentDescription = "Update", modifier = Modifier.size(20.dp)) }
                                     IconButton(onClick = { showDeleteConfirm = broadcast }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Delete, contentDescription = "Delete", modifier = Modifier.size(20.dp)) }
                                 }

@@ -85,7 +85,7 @@ fun QrScanDialog(onDismiss: () -> Unit, onScanned: (fileId: String, pk: String, 
                                                 val uri = android.net.Uri.parse(raw)
                                                  val fileId = uri.getQueryParameter("fileId") ?: continue
                                                  val pk = uri.getQueryParameter("pk") ?: continue
-                                                 val relayName = uri.getQueryParameter("relayName")
+                                                 val relayName = uri.getQueryParameter("relayName") ?: uri.getQueryParameter("fileName")
                                                  scanned = true
                                                  onScanned(fileId, pk, relayName)
                                             }

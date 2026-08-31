@@ -46,7 +46,7 @@ class SyncEngine(
         private const val TAG = "SyncEngine"
         private const val DEDUP_TTL_MS = 300_000L
         private const val PROBE_COOLDOWN_MS = 300_000L
-        const val MAX_FILE_SIZE = 5L * 1024 * 1024
+        const val MAX_FILE_SIZE = 10L * 1024 * 1024
     }
 
     private val scope = testScope ?: CoroutineScope(Dispatchers.IO + SupervisorJob())

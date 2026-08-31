@@ -333,15 +333,16 @@ fun SubscriptionRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
+                subscription.relayName?.let {
+                    Text(
+                        "#$it",
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                }
                 Text(
-                    subscription.relayName?.let { "#$it" } ?: subscription.fileId.take(8),
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                )
-                Text(
-                    if (subscription.localVersion != null) subscription.fileName ?: subscription.fileId.take(8)
-                    else subscription.relayName?.let { "#$it" } ?: subscription.fileId.take(8),
+                    subscription.fileName ?: subscription.fileId.take(8),
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -381,9 +382,9 @@ fun SubscriptionRow(
                             Base64.getUrlDecoder().decode(subscription.publicKey)
                         }
                         val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
-                        val relayNameEnc = java.net.URLEncoder.encode(subscription.relayName ?: "", "UTF-8")
+                        val nameParam = subscription.relayName?.let { "relayName=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: "fileName=${java.net.URLEncoder.encode(subscription.fileName ?: "", "UTF-8")}"
                         val link =
-                            "pyramidrelay://subscribe?fileId=${subscription.fileId}&pk=$pkUrl&relayName=$relayNameEnc&v=${subscription.localVersion ?: subscription.lastSeenVersion ?: 1}"
+                            "pyramidrelay://subscribe?fileId=${subscription.fileId}&pk=$pkUrl&$nameParam&v=${subscription.localVersion ?: subscription.lastSeenVersion ?: 1}"
                         val shareIntent = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
                             putExtra(Intent.EXTRA_TEXT, link)
@@ -458,7 +459,7 @@ fun PasteLinkDialog(onDismiss: () -> Unit, onConfirm: (fileId: String, pk: Strin
                     val uri = Uri.parse(linkText)
                     val fileId = uri.getQueryParameter("fileId") ?: throw Exception("Missing fileId")
                     val pk = uri.getQueryParameter("pk") ?: throw Exception("Missing pk")
-                    val relayName = uri.getQueryParameter("relayName")
+                    val relayName = uri.getQueryParameter("relayName") ?: uri.getQueryParameter("fileName")
                     onConfirm(fileId, pk, relayName)
                 } catch (e: Exception) {
                     error = "Invalid link format"
