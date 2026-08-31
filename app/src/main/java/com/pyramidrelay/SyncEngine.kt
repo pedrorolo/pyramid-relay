@@ -407,11 +407,13 @@ class SyncEngine(
             EventLog.log("scan", "Hidden relay ${existingHidden.fileId.takeLast(8)} updating v$localVer -> v$version")
             return fetchAndUpdateHidden(existingHidden, version, deviceAddress)
         }
-        // Enforce cap: max hidden = visibleCount + 1
-        val visibleCount = allSubs.count { !it.hidden }
+        // Enforce cap: max hidden = visibleSubscriptions + visibleBroadcasts + 1
+        val visibleSubCount = allSubs.count { !it.hidden }
         val hiddenCount = allSubs.count { it.hidden }
-        if (hiddenCount >= visibleCount + 1) {
-            EventLog.log("scan", "Hidden subscription cap reached ($hiddenCount >= ${visibleCount + 1}) - ignoring new advertisement")
+        val visibleBroadcastCount = broadcastDao.getAll().count { it.role == Role.ORIGINATOR }
+        val maxHidden = visibleSubCount + visibleBroadcastCount + 1
+        if (hiddenCount >= maxHidden) {
+            EventLog.log("scan", "Hidden subscription cap reached ($hiddenCount >= $maxHidden) - ignoring new advertisement")
             return false
         }
         // Create hidden subscription and download in relay mode

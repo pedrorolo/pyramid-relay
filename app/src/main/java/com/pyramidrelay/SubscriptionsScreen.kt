@@ -158,9 +158,11 @@ class SubscriptionsViewModel(
                 "sub",
                 "Deleting subscription \"${subscription.relayName ?: subscription.fileId.takeLast(8)}\" (local v${subscription.localVersion})"
             )
-            val visibleCount = subscriptionDao.getAll().count { !it.hidden } - 1 // excluding this one
+            val visibleSubCount = subscriptionDao.getAll().count { !it.hidden } - 1 // excluding this one
             val hiddenCount = subscriptionDao.getHiddenCount()
-            val canConvertToHidden = hiddenCount < visibleCount + 1
+            val visibleBroadcastCount = broadcastDao.getAll().count { it.role == Role.ORIGINATOR }
+            val maxHidden = visibleSubCount + visibleBroadcastCount + 1
+            val canConvertToHidden = hiddenCount < maxHidden
             syncEngine?.cancelTransfer(subscription.fileId)
             syncEngine?.clearDiscoveryStateForFile(subscription.fileId)
             syncEngine?.stopAdvertisingForFile(subscription.fileId)
@@ -180,8 +182,9 @@ class SubscriptionsViewModel(
     }
 
     private suspend fun cleanupHiddenSubscriptions() {
-        val visibleCount = subscriptionDao.getAll().count { !it.hidden }
-        val maxHidden = visibleCount + 1
+        val visibleSubCount = subscriptionDao.getAll().count { !it.hidden }
+        val visibleBroadcastCount = broadcastDao.getAll().count { it.role == Role.ORIGINATOR }
+        val maxHidden = visibleSubCount + visibleBroadcastCount + 1
         var hiddenCount = subscriptionDao.getHiddenCount()
         while (hiddenCount > maxHidden) {
             val oldest = subscriptionDao.getOldestHidden()
