@@ -4,7 +4,7 @@ P2P file-sharing app for Android. Designed for **offline environments** — even
 
 Share files and push updates to nearby devices via BLE — no Wi-Fi or internet required. Subscribers automatically relay what they receive to other peers, creating a resilient mesh that scales without internet connectivity.
 
-**Example use case:** An event organizer broadcasts the programme schedule. Attendees subscribe via QR code. When the organizer pushes an updated schedule, all subscribed attendees receive the update — and continue relaying it to others who join later.
+**Example use case:** An event organizer broadcasts the programme schedule. Attendees subscribe via QR code. The QR code or share link acts as the key — it contains the file ID and public key needed to connect and read the content from any relaying peer. When the organizer pushes an updated schedule, all subscribed attendees receive the update — and continue relaying it to others who join later.
 
 ## Features
 
