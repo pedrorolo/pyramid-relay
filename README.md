@@ -8,7 +8,7 @@
 
 P2P file-sharing app for Android. Designed for **offline environments** — events with crowded networks, remote locations, or anywhere without internet access.
 
-Share files and push updates to nearby devices via **BLE** (Bluetooth Low Energy) — no Wi-Fi or internet required. Each broadcast is protected by a per-file public key infrastructure (PKI): the originator's private key never leaves their device, and only the public key is shared via QR code or link. This ensures only the true originator can push updates — relays and third parties cannot forge new versions. Subscribers automatically relay what they receive to other peers, creating a resilient mesh that scales without internet connectivity.
+Share files and push updates to nearby devices via **BLE** (Bluetooth Low Energy) — no Wi-Fi or internet required. Each broadcast is protected by a per-file Public Key Infrastructure (PKI): the originator's private key never leaves their device, and only the public key is shared via QR code or link. This ensures only the true originator can push updates — relays and third parties cannot forge new versions. Subscribers automatically relay what they receive to other peers, creating a resilient mesh that scales without internet connectivity.
 
 **Use cases:**
 - An event organizer broadcasts the programme schedule — attendees subscribe via QR code, and when the organizer pushes an update, all subscribers receive it and continue relaying it to others who join later.
