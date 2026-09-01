@@ -5,23 +5,33 @@ plugins {
 }
 
 android {
-    namespace = "p2p.broadcaster"
+    namespace = "com.pyramidrelay"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "p2p.broadcaster"
+        applicationId = "com.pyramidrelay"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "0.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getProperty("user.home") + "/pyramid-relay-release.keystore")
+            storePassword = "pyramidrelay"
+            keyAlias = "pyramid-relay"
+            keyPassword = "pyramidrelay"
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

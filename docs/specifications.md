@@ -10,7 +10,7 @@
 Two-tab app (Broadcasts | Subscriptions) via Jetpack Navigation + BottomNavigationView:
 
 - **Originator** picks a file (SAF `ACTION_OPEN_DOCUMENT`), generates `Ed25519` keypair, signs `SHA256(fileId || version || SHA256(file))`, copies file to **app-private isolated store** (`files/store/<fileId>/v<version>/file`), advertises via BLE in background with `version` (and `publicKey` pointer).
-- **Subscriber** scans QR (`p2pbroadcaster://` deep link with `fileId` + `publicKey`), background-scans BLE; on `advertisedVersion > localVersion` or missing file, fetches via WiFi Direct, verifies signature with advertised `publicKey`, stores internally, shows local notification, then **relays** (re-advertises identically, no private key, only subscriptions screen).
+- **Subscriber** scans QR (`pyramidrelay://` deep link with `fileId` + `publicKey`), background-scans BLE; on `advertisedVersion > localVersion` or missing file, fetches via WiFi Direct, verifies signature with advertised `publicKey`, stores internally, shows local notification, then **relays** (re-advertises identically, no private key, only subscriptions screen).
 - Both roles keep **only latest verified version** internally. `Save` exports a copy to user-chosen filesystem location (does not affect internal store). Deleting a broadcast stops advertising immediately. Fully offline - no HTTPS.
 
 ## 2. Baseline Audit
@@ -155,13 +155,13 @@ Relays (`role === RELAY`) share via SyncEngine but **UI only on Subscriptions** 
 
 Jetpack Navigation + `BottomNavigation` (Broadcasts | Subscriptions):
 
-- **Broadcasts** `BroadcastsFragment`: `LazyColumn` of `Broadcast role=ORIGINATOR`. Row: name/version/size/status(advertising) + `Update` (SAF pick -> version++) + `Share` (QR dialog with `p2pbroadcaster://subscribe?fileId&pk=BASE64URL&name&v`) + `Delete` (stop adv + delete). `FloatingActionButton` `+ Broadcast`.
+- **Broadcasts** `BroadcastsFragment`: `LazyColumn` of `Broadcast role=ORIGINATOR`. Row: name/version/size/status(advertising) + `Update` (SAF pick -> version++) + `Share` (QR dialog with `pyramidrelay://subscribe?fileId&pk=BASE64URL&name&v`) + `Delete` (stop adv + delete). `FloatingActionButton` `+ Broadcast`.
 - **Subscriptions** `SubscriptionsFragment`: `LazyColumn` of `Subscription`. Row: fileId short/name, `localVersion vs lastSeen`, status(listening/downloading/ready/relaying) + `Scan QR` (CameraX + ML Kit barcode) + `Paste Link` (dialog) + `Save` (SAF export) + `Open` (`Intent.ACTION_VIEW`) + `Delete`. `Save` disabled until fetched. Relay status shown here, never in Broadcasts.
 - Dialogs: `QrDisplayDialog` (ZXing `qrcode`), `QrScanFragment` (CameraX).
 
 ## 12. QR / Deep Link
 
-Content `p2pbroadcaster://subscribe?fileId=UUID&pk=BASE64URL&name=...&v=1` (<2KB) offline only; no HTTPS.
+Content `pyramidrelay://subscribe?fileId=UUID&pk=BASE64URL&name=...&v=1` (<2KB) offline only; no HTTPS.
 
 - **Intent Filter** in `AndroidManifest.xml`:
 ```xml
@@ -169,7 +169,7 @@ Content `p2pbroadcaster://subscribe?fileId=UUID&pk=BASE64URL&name=...&v=1` (<2KB
     <action android:name="android.intent.action.VIEW" />
     <category android:name="android.intent.category.BROWSABLE" />
     <category android:name="android.intent.category.DEFAULT" />
-    <data android:scheme="p2pbroadcaster" android:host="subscribe" />
+    <data android:scheme="pyramidrelay" android:host="subscribe" />
 </intent-filter>
 ```
 - `MainActivity` handles `intent.data` -> extract query params -> navigate to `SubscriptionsFragment` with args.
