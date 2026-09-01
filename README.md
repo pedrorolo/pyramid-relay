@@ -48,6 +48,10 @@ Once a subscriber receives a file, they become a relay — re-advertising the co
 
 The QR code/link functions as a key — it contains the file ID and public key needed to connect and read the content from any relaying peer.
 
+## Compliance Note
+
+Pyramid Relay does **not** perform blind relay. Subscribers only re-advertise content they have explicitly received and opted into by scanning a QR code or following a share link. This design ensures users maintain full control over what they relay, helping avoid potential legal and compliance issues associated with automated content distribution.
+
 ## Tech Stack
 
 - **Kotlin** with Jetpack Compose UI
