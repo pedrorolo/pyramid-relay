@@ -21,11 +21,11 @@ Run the full unit test suite:
 ./gradlew testDebugUnitTest
 ```
 
-This executes all tests under `app/src/test/java/p2p/broadcaster/` using Robolectric + MockK.
+This executes all tests under `app/src/test/java/com/pyramidrelay/` using Robolectric + MockK.
 
 ## Test Locations
 
-- Unit tests: `app/src/test/java/p2p/broadcaster/`
+- Unit tests: `app/src/test/java/com/pyramidrelay/`
 - Test framework: Robolectric + MockK
 - Configuration: `testOptions { unitTests.isReturnDefaultValues = true }`
 

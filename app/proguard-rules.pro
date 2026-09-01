@@ -19,3 +19,20 @@
 -keep class java.security.KeyStore { *; }
 -keep class java.security.PrivateKey { *; }
 -keep class java.security.PublicKey { *; }
+
+# ML Kit - keep all internal classes and their members
+-keep class com.google.mlkit.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_barcode.** { *; }
+-keep class com.google.mlkit.common.** { *; }
+-keep class com.google.mlkit.vision.** { *; }
+-dontwarn com.google.mlkit.**
+-dontwarn com.google.android.gms.internal.mlkit_**
+
+# CameraX
+-keep class androidx.camera.** { *; }
+-dontwarn androidx.camera.**
+
+# Google Play Services / Dagger dependency injection used by ML Kit
+-keep class dagger.** { *; }
+-keep class * extends dagger.internal.Factory { *; }
+-dontwarn dagger.**
