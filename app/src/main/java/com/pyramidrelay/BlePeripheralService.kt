@@ -80,6 +80,7 @@ class BlePeripheralService(private val context: Context, private val transferSem
     var isPeerTransferAllowed: ((String) -> Boolean)? = null
     var onUploadStart: ((String) -> Unit)? = null
     var onUploadEnd: ((String) -> Unit)? = null
+    var onCongestionDetected: (() -> Unit)? = null
 
     @SuppressLint("MissingPermission")
     fun startGattServer() {
@@ -101,6 +102,7 @@ class BlePeripheralService(private val context: Context, private val transferSem
                     EventLog.log("ble", "Broadcaster: central $addr CONNECTED (status=$status)")
                 else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
                     EventLog.log("ble", "Broadcaster: central $addr DISCONNECTED (status=$status)")
+                    if (status == 147) onCongestionDetected?.invoke()
                     device?.address?.let { addr ->
                         val fId = streamToFileId.remove(addr)
                         // Don't clear selectedFileByCentral here — the central may reconnect
@@ -203,7 +205,17 @@ class BlePeripheralService(private val context: Context, private val transferSem
 
     @SuppressLint("MissingPermission")
     fun restartGattServer() {
-        Log.d(TAG, "Restarting GATT server")
+        val connectedDevices = bluetoothManager.getConnectedDevices(android.bluetooth.BluetoothProfile.GATT_SERVER)
+        EventLog.log("ble", "restartGattServer called (${connectedDevices.size} connected devices: ${connectedDevices.map { it.address?.takeLast(5) }})")
+        Log.d(TAG, "Restarting GATT server with ${connectedDevices.size} connected devices")
+        for (device in connectedDevices) {
+            try {
+                gattServer?.cancelConnection(device)
+                EventLog.log("ble", "Disconnected ${device.address?.takeLast(5)} during GATT server restart")
+            } catch (e: Exception) {
+                EventLog.log("ble", "Error disconnecting ${device.address?.takeLast(5)}: ${e.message}")
+            }
+        }
         gattServer?.close()
         gattServer = null
         Thread.sleep(100) // Samsung devices need a delay between close and open
@@ -223,12 +235,10 @@ class BlePeripheralService(private val context: Context, private val transferSem
      * BLE stack without forwarding to onDescriptorWriteRequest.
      */
     private val pushing = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-    private val uploadSemaphore = java.util.concurrent.Semaphore(1) // Only one upload at a time
     private fun pushStreamTo(address: String) {
         if (!pushing.add(address)) return
         Thread {
             try {
-                uploadSemaphore.acquire()
                 runBlocking { transferSemaphore.acquire() }
                 // Wait until peer is not transferring to us
                 while (isPeerTransferAllowed?.invoke(address) == false) {
@@ -265,7 +275,6 @@ class BlePeripheralService(private val context: Context, private val transferSem
                     Thread.sleep(10) // give Samsung BLE stack time to process
                 }
             } finally {
-                uploadSemaphore.release()
                 transferSemaphore.release()
                 // Transfer ended - notify callback to resume advertising/scanning
                 EventLog.log("ble", "pushStreamTo finally: invoking onTransferEnd")
@@ -296,6 +305,14 @@ class BlePeripheralService(private val context: Context, private val transferSem
             // Disconnect the central to notify it that the stream was stopped
             gattServer?.cancelConnection(connectedDevice(address))
             EventLog.log("ble", "Stopped streaming ${fileId.takeLast(8)} to ${address.takeLast(5)}")
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun disconnectPeer(address: String) {
+        connectedDevice(address)?.let { device ->
+            gattServer?.cancelConnection(device)
+            EventLog.log("ble", "Disconnected peer ${address.takeLast(5)} due to congestion")
         }
     }
 
@@ -435,6 +452,13 @@ class BlePeripheralService(private val context: Context, private val transferSem
 
     @SuppressLint("MissingPermission")
     fun stopGattServer() {
+        val connectedDevices = bluetoothManager.getConnectedDevices(android.bluetooth.BluetoothProfile.GATT_SERVER)
+        for (device in connectedDevices) {
+            try { gattServer?.cancelConnection(device) } catch (_: Exception) {}
+        }
+        if (connectedDevices.isNotEmpty()) {
+            try { Thread.sleep(500) } catch (_: InterruptedException) {}
+        }
         try { gattServer?.close() } catch (e: Exception) { EventLog.log("ble", "Error closing GATT server: ${e.message}") }
         gattServer = null
     }

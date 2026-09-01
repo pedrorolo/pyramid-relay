@@ -91,6 +91,10 @@ class SubscriptionsViewModel(
         get() = syncEngine?.downloadProgress ?: MutableStateFlow(
             emptyMap()
         )
+    val streamingProgress: StateFlow<Map<String, Float>>
+        get() = syncEngine?.streamingProgress ?: MutableStateFlow(
+            emptyMap()
+        )
     val currentAdvertisingFileId: StateFlow<String?>
         get() = syncEngine?.currentAdvertisingFileId ?: MutableStateFlow(null)
 
@@ -164,7 +168,9 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
     val downloadingFileIds by viewModel.downloadingFileIds.collectAsState()
     val activeStreamingFileIds by viewModel.activeStreamingFileIds.collectAsState()
     val downloadProgress by viewModel.downloadProgress.collectAsState()
+    val streamingProgress by viewModel.streamingProgress.collectAsState()
     val currentAdvertisingFileId by viewModel.currentAdvertisingFileId.collectAsState()
+    EventLog.log("app", "SubscriptionsScreen: downloadingFileIds=$downloadingFileIds, downloadProgress=$downloadProgress")
     var showPasteDialog by remember { mutableStateOf(false) }
     var showQrScan by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf<SubscriptionEntity?>(null) }
@@ -197,7 +203,7 @@ fun SubscriptionsScreen(initialFileId: String? = null, initialPk: String? = null
                             isDownloading = downloadingFileIds.contains(subscription.fileId),
                             isStreaming = activeStreamingFileIds.contains(subscription.fileId),
                             isAdvertising = currentAdvertisingFileId == subscription.fileId,
-                            progress = downloadProgress[subscription.fileId] ?: 0f,
+                            progress = if (activeStreamingFileIds.contains(subscription.fileId)) streamingProgress[subscription.fileId] ?: 0f else downloadProgress[subscription.fileId] ?: 0f,
                             onDelete = { showDeleteConfirm = subscription }
                         )
                     }

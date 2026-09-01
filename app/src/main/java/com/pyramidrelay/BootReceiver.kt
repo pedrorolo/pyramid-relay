@@ -13,13 +13,18 @@ class BootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
-        Log.d(TAG, "Boot completed, starting BLE service")
-        EventLog.log("app", "Device booted — starting Pyramid Relay service")
+        Log.d(TAG, "Boot completed, starting BLE service and app UI")
+        EventLog.log("app", "Device booted — starting Pyramid Relay service and UI")
         try {
-            ContextCompat.startForegroundService(context, Intent(context, BleForegroundService::class.java))
+            val serviceIntent = Intent(context, BleForegroundService::class.java)
+            ContextCompat.startForegroundService(context, serviceIntent)
+            val mainIntent = Intent(context, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(mainIntent)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start service on boot", e)
-            EventLog.log("app", "Failed to start service on boot: ${e.message}")
+            Log.e(TAG, "Failed to start on boot", e)
+            EventLog.log("app", "Failed to start on boot: ${e.message}")
         }
     }
 }

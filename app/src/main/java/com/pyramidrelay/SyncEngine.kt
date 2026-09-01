@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -68,10 +69,14 @@ class SyncEngine(
     private val activeDownloadJobs = ConcurrentHashMap<String, Job>()
     private val downloadingFileDeviceMap = ConcurrentHashMap<String, String>()
     private val downloadMutex = Mutex()
-    private val downloadSemaphore = Semaphore(1) // Only one download at a time
-    private val uploadSemaphore = Semaphore(1) // Only one upload at a time
     private val downloadRetryCount = ConcurrentHashMap<String, Int>()
     private val maxRetries = 10
+
+    private var lastCongestionTime = 0L
+    private var maxCongestionPauseMs = 0L
+    private val CONGESTION_BASE_PAUSE_MS = 15_000L
+    private val CONGESTION_MAX_PAUSE_MS = 240_000L
+    private val CONGESTION_MULTIPLIER = 2L
 
     private val _downloadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
     val downloadProgress: StateFlow<Map<String, Float>> = _downloadProgress.asStateFlow()
@@ -85,6 +90,37 @@ class SyncEngine(
             ?.adapter?.isEnabled == true
     )
     val isBluetoothAvailable: StateFlow<Boolean> = _isBluetoothAvailable.asStateFlow()
+
+    private fun isInCongestionPause(): Boolean {
+        if (maxCongestionPauseMs <= 0 || lastCongestionTime <= 0) return false
+        val elapsed = System.currentTimeMillis() - lastCongestionTime
+        val remainingPause = maxCongestionPauseMs - elapsed
+        return remainingPause > 0
+    }
+
+    private fun getCongestionPauseRemainingMs(): Long {
+        if (maxCongestionPauseMs <= 0 || lastCongestionTime <= 0) return 0
+        val elapsed = System.currentTimeMillis() - lastCongestionTime
+        return (maxCongestionPauseMs - elapsed).coerceAtLeast(0)
+    }
+
+    private fun recordCongestion() {
+        val now = System.currentTimeMillis()
+        if (lastCongestionTime > 0 && (now - lastCongestionTime) < CONGESTION_MAX_PAUSE_MS) {
+            maxCongestionPauseMs = (maxCongestionPauseMs * CONGESTION_MULTIPLIER).coerceAtMost(CONGESTION_MAX_PAUSE_MS)
+        } else {
+            maxCongestionPauseMs = CONGESTION_BASE_PAUSE_MS
+        }
+        lastCongestionTime = now
+        val pauseSeconds = maxCongestionPauseMs / 1000
+        EventLog.log("sync", "Congestion recorded: pause=${pauseSeconds}s, decaying to 0 over ${pauseSeconds}s")
+        // Schedule resume after the pause expires
+        scope.launch {
+            kotlinx.coroutines.delay(maxCongestionPauseMs)
+            EventLog.log("sync", "Congestion pause expired, resuming advertising and scanning")
+            resumeAdvertisingAndScanning()
+        }
+    }
 
     private val bluetoothStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
@@ -160,9 +196,24 @@ class SyncEngine(
             bleCentralService.onDeviceDiscovered = { address, serviceData ->
                 scope.launch { handleDiscoveredDevice(address, serviceData) }
             }
-            blePeripheralService.isPeerTransferAllowed = { address -> !activeDownloadPeers.contains(address) }
-            blePeripheralService.onUploadStart = { address -> activeUploadPeers.add(address) }
-            blePeripheralService.onUploadEnd = { address -> activeUploadPeers.remove(address) }
+            bleCentralService.onCongestionDetected = {
+                recordCongestion()
+                cancelAllTransfersForCongestion()
+            }
+            blePeripheralService.isPeerTransferAllowed = { address ->
+                !activeDownloadPeers.contains(address) && !isInCongestionPause()
+            }
+            blePeripheralService.onUploadStart = { address ->
+                try { runBlocking { transferSemaphore.acquire() } } catch (_: Exception) {}
+                activeUploadPeers.add(address)
+                bleCentralService.stopScan()
+                blePeripheralService.stopAllAdvertising()
+            }
+            blePeripheralService.onUploadEnd = { address ->
+                activeUploadPeers.remove(address)
+                transferSemaphore.release()
+                resumeAdvertisingAndScanning()
+            }
             blePeripheralService.onTransferStart = { stopAdvertisingAndScanning() }
             blePeripheralService.onTransferEnd = {
                 EventLog.log("sync", "onTransferEnd fired, resuming advertising/scanning")
@@ -170,6 +221,10 @@ class SyncEngine(
                 resumeAdvertisingAndScanning()
             }
             blePeripheralService.onStreamArmed = { stopAdvertisingAndScanning() }
+            blePeripheralService.onCongestionDetected = {
+                recordCongestion()
+                cancelAllTransfersForCongestion()
+            }
             // Retry GATT server if initial attempt fails (permissions may not be ready yet after fresh install)
             for (attempt in 1..5) {
                 try { blePeripheralService.startGattServer(); break } catch (e: Exception) {
@@ -223,7 +278,11 @@ class SyncEngine(
             launch {
                 while (true) {
                     kotlinx.coroutines.delay(300_000L)
-                    if (_downloadingFileIds.value.isNotEmpty() || activeUploadPeers.isNotEmpty()) {
+                    if (isInCongestionPause()) {
+                        EventLog.log("ble", "Periodic scan restart skipped (congestion pause active)")
+                        continue
+                    }
+                    if (transferSemaphore.availablePermits == 0 || _downloadingFileIds.value.isNotEmpty() || activeUploadPeers.isNotEmpty()) {
                         EventLog.log("ble", "Periodic scan restart skipped (transfer in progress)")
                         continue
                     }
@@ -241,8 +300,12 @@ class SyncEngine(
             launch {
                 while (true) {
                     kotlinx.coroutines.delay(300_000L)
-                    if (blePeripheralService.activeStreamingFileIds.value.isNotEmpty()) {
-                        EventLog.log("ble", "Periodic GATT server restart skipped (streaming in progress)")
+                    if (isInCongestionPause()) {
+                        EventLog.log("ble", "Periodic GATT server restart skipped (congestion pause active)")
+                        continue
+                    }
+                    if (transferSemaphore.availablePermits == 0 || blePeripheralService.activeStreamingFileIds.value.isNotEmpty() || _downloadingFileIds.value.isNotEmpty()) {
+                        EventLog.log("ble", "Periodic GATT server restart skipped (transfer in progress)")
                         continue
                     }
                     try {
@@ -270,10 +333,22 @@ class SyncEngine(
     }
 
     fun resumeAdvertisingAndScanning() {
+        if (isInCongestionPause()) {
+            val remaining = getCongestionPauseRemainingMs()
+            EventLog.log("sync", "resumeAdvertisingAndScanning skipped - congestion pause active (${remaining / 1000}s remaining)")
+            return
+        }
         EventLog.log("sync", "resumeAdvertisingAndScanning called, scope active=${scope.coroutineContext[kotlinx.coroutines.Job]?.isActive}")
+        val hasActiveTransfer = _downloadingFileIds.value.isNotEmpty() || activeUploadPeers.isNotEmpty()
+        EventLog.log("sync", "resumeAdvertisingAndScanning: hasActiveTransfer=$hasActiveTransfer, downloading=${_downloadingFileIds.value.size}, uploading=${activeUploadPeers.size}, permits=${transferSemaphore.availablePermits}")
         scope.launch {
             try {
-                blePeripheralService.restartGattServer()
+                if (hasActiveTransfer) {
+                    EventLog.log("ble", "resumeAdvertisingAndScanning: skipping GATT server restart (active transfer in progress)")
+                } else {
+                    blePeripheralService.restartGattServer()
+                    EventLog.log("ble", "resumeAdvertisingAndScanning: GATT server restarted")
+                }
                 bleCentralService.startScan()
                 val broadcasts = broadcastDao.getAll()
                 for (b in broadcasts) {
@@ -334,7 +409,13 @@ class SyncEngine(
      * completed successfully (meta verified AND transfer accepted).
      */
     internal suspend fun handleDiscoveredDevice(deviceAddress: String, serviceData: ByteArray): Boolean {
+        if (isInCongestionPause()) {
+            EventLog.log("scan", "Congestion pause active, skipping discovery")
+            return false
+        }
         if (serviceData.size < 14) { EventLog.log("scan", "Advertisement too short (${serviceData.size}B) - dropped"); return false }
+        // Random jitter to stagger competing devices discovering the same peer
+        kotlinx.coroutines.delay((Math.random() * 5_000).toLong())
         val fileIdHash = serviceData.copyOfRange(0, 6)
         val version = ((serviceData[6].toInt() and 0xFF) shl 24) or ((serviceData[7].toInt() and 0xFF) shl 16) or ((serviceData[8].toInt() and 0xFF) shl 8) or (serviceData[9].toInt() and 0xFF)
         val keyId = serviceData.copyOfRange(10, 14)
@@ -418,266 +499,168 @@ class SyncEngine(
                 return false
             }
         }
-        // Wait if there's an active upload to this peer
-        while (activeUploadPeers.contains(deviceAddress)) {
+        // Wait if there's an active transfer
+        while (transferSemaphore.availablePermits == 0 || activeUploadPeers.contains(deviceAddress)) {
             kotlinx.coroutines.delay(100)
         }
-        // Only one transfer (upload OR download) at a time, and only one transfer per peer
+        // Only one transfer at a time, and only one transfer per peer
+        var downloadResult = false
         transferSemaphore.withPermit {
-        downloadSemaphore.withPermit {
-        peerLock(deviceAddress).withLock {
-            _downloadingFileIds.value = _downloadingFileIds.value + broadcast.fileId
-            activeDownloadPeers.add(deviceAddress)
-            activeDownloadJobs[broadcast.fileId] = currentCoroutineContext()[Job]!!
-            downloadingFileDeviceMap[broadcast.fileId] = deviceAddress
-            stopAdvertisingAndScanning()
-            EventLog.log("sync", "Download started for \"${broadcast.fileName}\" v$newVersion from ${deviceAddress.takeLast(5)}")
-        try {
-            val fileIdHash = cryptoService.fileIdHash(broadcast.fileId)
-            val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
-                EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting relay update"); return false
-            }
-            if (metaPayload.fileSize > MAX_FILE_SIZE) {
-                EventLog.log("sync", "Relay file too large (compressed+encrypted ${metaPayload.fileSize}B > ${MAX_FILE_SIZE}B) - aborting")
-                return false
-            }
-            // Use the public key from the broadcast entity (originator), not from META
-            val hashHex = metaPayload.fileHash.joinToString("") { "%02x".format(it) }
-            val tmpFile = fileService.getTmpFile(broadcast.fileId, newVersion)
-            tmpFile.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IllegalStateException("Cannot create temporary download directory") }
-            EventLog.log("ble", "Streaming ${broadcast.fileId} v$newVersion (${metaPayload.fileSize}B compressed) over GATT")
-            val transferred = try {
-                tmpFile.outputStream().use { output ->
-                    bleCentralService.fetchFile(deviceAddress, newVersion, metaPayload.fileSize, output) { got, total ->
-                        val progress = (got.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-                        _downloadProgress.value = _downloadProgress.value + (broadcast.fileId to progress)
+            peerLock(deviceAddress).withLock {
+                _downloadingFileIds.value = _downloadingFileIds.value + broadcast.fileId
+                activeDownloadPeers.add(deviceAddress)
+                activeDownloadJobs[broadcast.fileId] = currentCoroutineContext()[Job]!!
+                downloadingFileDeviceMap[broadcast.fileId] = deviceAddress
+                stopAdvertisingAndScanning()
+                blePeripheralService.stopGattServer()
+                kotlinx.coroutines.delay(2_000L)
+                EventLog.log("sync", "Download started for \"${broadcast.fileName}\" v$newVersion from ${deviceAddress.takeLast(5)}")
+                try {
+                    kotlinx.coroutines.delay(1_000L + (Math.random() * 1_000).toLong())
+                    val fileIdHash = cryptoService.fileIdHash(broadcast.fileId)
+                    val metaPayload = bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
+                        EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting relay update"); return@withLock
                     }
-                }
-            } catch (e: Exception) {
-                EventLog.log("ble", "fetchFile error: ${e.message}"); false
-            }
-            if (!transferred) { tmpFile.delete(); val dedupKey = "${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); EventLog.log("wifi", "Transfer failed for ${broadcast.fileId}"); return false }
-            if (!tmpFile.isFile || tmpFile.length() != metaPayload.fileSize) {
-                EventLog.log("sync", "Downloaded file size mismatch for ${broadcast.fileId}: ${tmpFile.length()}/${metaPayload.fileSize}B")
-                tmpFile.delete(); val dedupKey = "${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); return false
-            }
-            val encrypted = tmpFile.readBytes()
-            val compressed = try {
-                cryptoService.decryptCompressed(encrypted, cryptoService.publicKeyFromBase64(broadcast.publicKey))
-            } catch (e: Exception) { tmpFile.delete(); EventLog.log("sync", "Decrypt failed: ${e.message}"); val dedupKey = "${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); return false }
-            tmpFile.writeBytes(compressed)
-            val internalFile = fileService.getFile(broadcast.fileId, newVersion)
-            try {
-                fileService.decompressFile(tmpFile, internalFile)
-                tmpFile.delete()
-            } catch (e: Exception) {
-                EventLog.log("sync", "Decompression failed for ${broadcast.fileId}: ${e.message}")
-                tmpFile.delete(); internalFile.delete(); val dedupKey = "${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); return false
-            }
-            val receivedHash = cryptoService.sha256Hex(internalFile.readBytes())
-            if (receivedHash != hashHex) {
-                internalFile.delete(); EventLog.log("sync", "Hash mismatch after transfer of ${broadcast.fileId} - discarded"); val dedupKey = "${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); return false
-            }
-            // Success - write probe cooldown only after successful transfer
-            lastProbeAt["$deviceAddress:${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"] = System.currentTimeMillis()
-            broadcastDao.updateVersion(broadcast.fileId, newVersion, Base64.getEncoder().encodeToString(metaPayload.fileHash), "", internalFile.absolutePath, internalFile.length(), encrypted.size.toLong(), System.currentTimeMillis(), metaPayload.fileName.takeIf { it.isNotBlank() } ?: broadcast.fileName)
-            subscriptionDao.updateReceived(broadcast.fileId, newVersion, internalFile.absolutePath, newVersion, System.currentTimeMillis(), metaPayload.fileName.takeIf { it.isNotBlank() } ?: broadcast.fileName)
-            EventLog.log("sync", "Subscription record updated to v$newVersion for ${broadcast.fileId}")
-            fileService.evictOldVersions(broadcast.fileId, newVersion)
-            EventLog.log("sync", "Relay copy updated: ${broadcast.fileName} v${broadcast.version} -> v$newVersion")
-            notificationService.showUpdateNotification(broadcast.fileName, broadcast.fileId, broadcast.version, newVersion)
-            blePeripheralService.stopAdvertising(broadcast.fileId)
-            broadcastDao.getById(broadcast.fileId)?.let { startAdvertising(it) }
-            return true
-        } catch (e: Exception) { Log.e(TAG, "Error fetching update ${broadcast.fileId}", e); EventLog.log("sync", "Error fetching update ${broadcast.fileId}: ${e.message}"); return false }
-        finally {
-            activeDownloadPeers.remove(deviceAddress)
-            _downloadingFileIds.value = _downloadingFileIds.value - broadcast.fileId
-            _downloadProgress.value = _downloadProgress.value - broadcast.fileId
-            downloadingFileDeviceMap.remove(broadcast.fileId)
-            activeDownloadJobs.remove(broadcast.fileId)
-            resumeAdvertisingAndScanning()
-            EventLog.log("sync", "Download finished for \"${broadcast.fileName}\"")
-        }
-        } // peerLock
-        } // transferSemaphore
-        }
+                    if (metaPayload.fileSize > MAX_FILE_SIZE) {
+                        EventLog.log("sync", "Relay file too large (compressed+encrypted ${metaPayload.fileSize}B > ${MAX_FILE_SIZE}B) - aborting"); return@withLock
+                    }
+                    val hashHex = metaPayload.fileHash.joinToString("") { "%02x".format(it) }
+                    val tmpFile = fileService.getTmpFile(broadcast.fileId, newVersion)
+                    tmpFile.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IllegalStateException("Cannot create temporary download directory") }
+                    EventLog.log("ble", "Streaming ${broadcast.fileId} v$newVersion (${metaPayload.fileSize}B compressed) over GATT")
+                    val transferred = try {
+                        tmpFile.outputStream().use { output ->
+                            bleCentralService.fetchFile(deviceAddress, newVersion, metaPayload.fileSize, output) { got, total ->
+                                val progress = (got.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                                _downloadProgress.value = _downloadProgress.value + (broadcast.fileId to progress)
+                            }
+                        }
+                    } catch (e: Exception) { EventLog.log("ble", "fetchFile error: ${e.message}"); false }
+                    if (!transferred) { tmpFile.delete(); val dedupKey = "${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); EventLog.log("wifi", "Transfer failed for ${broadcast.fileId}"); return@withLock }
+                    if (!tmpFile.isFile || tmpFile.length() != metaPayload.fileSize) { EventLog.log("sync", "Downloaded file size mismatch for ${broadcast.fileId}: ${tmpFile.length()}/${metaPayload.fileSize}B"); tmpFile.delete(); val dedupKey = "${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); return@withLock }
+                    val encrypted = tmpFile.readBytes()
+                    val compressed = try { cryptoService.decryptCompressed(encrypted, cryptoService.publicKeyFromBase64(broadcast.publicKey)) } catch (e: Exception) { tmpFile.delete(); EventLog.log("sync", "Decrypt failed: ${e.message}"); val dedupKey = "${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); return@withLock }
+                    tmpFile.writeBytes(compressed)
+                    val internalFile = fileService.getFile(broadcast.fileId, newVersion)
+                    try { fileService.decompressFile(tmpFile, internalFile); tmpFile.delete() } catch (e: Exception) { EventLog.log("sync", "Decompression failed for ${broadcast.fileId}: ${e.message}"); tmpFile.delete(); internalFile.delete(); val dedupKey = "${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); return@withLock }
+                    val receivedHash = cryptoService.sha256Hex(internalFile.readBytes())
+                    if (receivedHash != hashHex) { internalFile.delete(); EventLog.log("sync", "Hash mismatch after transfer of ${broadcast.fileId} - discarded"); val dedupKey = "${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); return@withLock }
+                    lastProbeAt["$deviceAddress:${cryptoService.fileIdHash(broadcast.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"] = System.currentTimeMillis()
+                    broadcastDao.updateVersion(broadcast.fileId, newVersion, Base64.getEncoder().encodeToString(metaPayload.fileHash), "", internalFile.absolutePath, internalFile.length(), encrypted.size.toLong(), System.currentTimeMillis(), metaPayload.fileName.takeIf { it.isNotBlank() } ?: broadcast.fileName)
+                    subscriptionDao.updateReceived(broadcast.fileId, newVersion, internalFile.absolutePath, newVersion, System.currentTimeMillis(), metaPayload.fileName.takeIf { it.isNotBlank() } ?: broadcast.fileName)
+                    EventLog.log("sync", "Subscription record updated to v$newVersion for ${broadcast.fileId}")
+                    fileService.evictOldVersions(broadcast.fileId, newVersion)
+                    EventLog.log("sync", "Relay copy updated: ${broadcast.fileName} v${broadcast.version} -> v$newVersion")
+                    notificationService.showUpdateNotification(broadcast.fileName, broadcast.fileId, broadcast.version, newVersion)
+                    blePeripheralService.stopAdvertising(broadcast.fileId)
+                    broadcastDao.getById(broadcast.fileId)?.let { startAdvertising(it) }
+                    downloadResult = true
+                } catch (e: Exception) { Log.e(TAG, "Error fetching update ${broadcast.fileId}", e); EventLog.log("sync", "Error fetching update ${broadcast.fileId}: ${e.message}") }
+                activeDownloadPeers.remove(deviceAddress)
+                _downloadingFileIds.value = _downloadingFileIds.value - broadcast.fileId
+                _downloadProgress.value = _downloadProgress.value - broadcast.fileId
+                downloadingFileDeviceMap.remove(broadcast.fileId)
+                activeDownloadJobs.remove(broadcast.fileId)
+                EventLog.log("sync", "Download finished for \"${broadcast.fileName}\"")
+            } // peerLock
+        } // transferSemaphore - semaphore released here
+        resumeAdvertisingAndScanning()
+        return downloadResult
     }
 
     /** Subscriber receiving a new version of a subscribed file. */
     private suspend fun fetchAndUpdateSubscription(subscription: SubscriptionEntity, newVersion: Int, deviceAddress: String): Boolean {
-        // Prevent multiple concurrent downloads for the same fileId - atomic check-and-add
         downloadMutex.withLock {
             if (_downloadingFileIds.value.contains(subscription.fileId)) {
                 EventLog.log("sync", "Download already in progress for \"${subscription.fileName ?: subscription.fileId}\" - skipping duplicate")
                 return false
             }
-            // Check retry limit
             val retries = downloadRetryCount.getOrDefault(subscription.fileId, 0)
             if (retries >= maxRetries) {
                 EventLog.log("sync", "Max retries ($maxRetries) reached for \"${subscription.fileName ?: subscription.fileId}\" - giving up")
                 return false
             }
         }
-        // Wait if there's an active upload to this peer
         while (activeUploadPeers.contains(deviceAddress)) {
             kotlinx.coroutines.delay(100)
         }
-        // Only one download at a time, and only one transfer per peer
-        downloadSemaphore.withPermit {
-        peerLock(deviceAddress).withLock {
-            _downloadingFileIds.value = _downloadingFileIds.value + subscription.fileId
-            EventLog.log("sync", "Added ${subscription.fileId.takeLast(8)} to downloadingFileIds (now: ${_downloadingFileIds.value.size})")
-            activeDownloadPeers.add(deviceAddress)
-            activeDownloadJobs[subscription.fileId] = currentCoroutineContext()[Job]!!
-            downloadingFileDeviceMap[subscription.fileId] = deviceAddress
-            stopAdvertisingAndScanning()
-            EventLog.log("sync", "Download started for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion from ${deviceAddress.takeLast(5)}")
         var downloadResult = false
-        try {
-            withTimeout(3_600_000L) {
-            val fileIdHash = cryptoService.fileIdHash(subscription.fileId)
-            val metaPayload = withTimeout(60_000L) {
-                bleCentralService.readMeta(deviceAddress, fileIdHash) ?: run {
-                    EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting fetch"); return@withTimeout null
-                }
-            }
-            if (metaPayload == null) return@withTimeout
-            if (metaPayload.fileSize > MAX_FILE_SIZE) {
-                EventLog.log("sync", "File too large (compressed+encrypted ${metaPayload.fileSize}B > ${MAX_FILE_SIZE}B) - aborting")
-                return@withTimeout
-            }
-            // Use the public key from the subscription (obtained from QR code/link), not from META
-            val hashHex = metaPayload.fileHash.joinToString("") { "%02x".format(it) }
-            EventLog.log("gatt", "Meta verified for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
-            val tmpFile = fileService.getTmpFile(subscription.fileId, newVersion)
-            tmpFile.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IllegalStateException("Cannot create temporary download directory") }
-            EventLog.log("ble", "Streaming ${subscription.fileId} v$newVersion (${metaPayload.fileSize}B compressed) over GATT, tmpFile=${tmpFile.absolutePath}")
-            val transferred = try {
-                tmpFile.outputStream().use { output ->
-                    EventLog.log("ble", "Output stream opened: ${output.javaClass.name}")
-                    bleCentralService.fetchFile(deviceAddress, newVersion, metaPayload.fileSize, output) { got, total ->
-                        val progress = (got.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-                        _downloadProgress.value = _downloadProgress.value + (subscription.fileId to progress)
+        transferSemaphore.withPermit {
+            peerLock(deviceAddress).withLock {
+                _downloadingFileIds.value = _downloadingFileIds.value + subscription.fileId
+                EventLog.log("sync", "Added ${subscription.fileId.takeLast(8)} to downloadingFileIds (now: ${_downloadingFileIds.value.size}), progress=${_downloadProgress.value[subscription.fileId]}")
+                activeDownloadPeers.add(deviceAddress)
+                activeDownloadJobs[subscription.fileId] = currentCoroutineContext()[Job]!!
+                downloadingFileDeviceMap[subscription.fileId] = deviceAddress
+                stopAdvertisingAndScanning()
+                blePeripheralService.stopGattServer()
+                kotlinx.coroutines.delay(2_000L)
+                EventLog.log("sync", "Download started for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion from ${deviceAddress.takeLast(5)}")
+                try {
+                    kotlinx.coroutines.delay(1_000L + (Math.random() * 1_000).toLong())
+                    val fileIdHash = cryptoService.fileIdHash(subscription.fileId)
+                    var metaPayload: BleMetaPayload? = null
+                    try { metaPayload = withTimeout(45_000L) { bleCentralService.readMeta(deviceAddress, fileIdHash) } } catch (_: Exception) {}
+                    if (metaPayload == null) { EventLog.log("sync", "No meta payload from ${deviceAddress.takeLast(5)} - aborting fetch"); return@withLock }
+                    if (metaPayload.fileSize > MAX_FILE_SIZE) { EventLog.log("sync", "File too large (${metaPayload.fileSize}B > ${MAX_FILE_SIZE}B) - aborting"); return@withLock }
+                    val hashHex = metaPayload.fileHash.joinToString("") { "%02x".format(it) }
+                    EventLog.log("gatt", "Meta verified for \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
+                    val tmpFile = fileService.getTmpFile(subscription.fileId, newVersion)
+                    tmpFile.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IllegalStateException("Cannot create temp download dir") }
+                    EventLog.log("ble", "Streaming ${subscription.fileId} v$newVersion (${metaPayload.fileSize}B compressed) over GATT")
+                    val transferred = try {
+                        tmpFile.outputStream().use { output ->
+                            bleCentralService.fetchFile(deviceAddress, newVersion, metaPayload.fileSize, output) { got, total ->
+                                val progress = (got.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                                _downloadProgress.value = _downloadProgress.value + (subscription.fileId to progress)
+                            }
+                        }
+                    } catch (e: Exception) { EventLog.log("ble", "fetchFile error: ${e.message}"); false }
+                    EventLog.log("ble", "After fetchFile: transferred=$transferred, tmpFile.exists()=${tmpFile.exists()}, tmpFile.length()=${tmpFile.length()}")
+                    if (!transferred) { tmpFile.delete(); downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1; val dedupKey = "${cryptoService.fileIdHash(subscription.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); EventLog.log("sync", "Transfer failed for ${subscription.fileId} (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)"); return@withLock }
+                    if (!tmpFile.isFile || tmpFile.length() != metaPayload.fileSize) { EventLog.log("sync", "Downloaded file size mismatch for ${subscription.fileId}: ${tmpFile.length()}/${metaPayload.fileSize}B"); tmpFile.delete(); downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1; val dedupKey = "${cryptoService.fileIdHash(subscription.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); return@withLock }
+                    val encrypted = tmpFile.readBytes()
+                    val persistedEnvelope = File(fileService.getVersionDir(subscription.fileId, newVersion), "file.encrypted")
+                    persistedEnvelope.parentFile?.mkdirs()
+                    persistedEnvelope.writeBytes(encrypted)
+                    val compressed = try { cryptoService.decryptCompressed(encrypted, cryptoService.publicKeyFromBase64(subscription.publicKey)) } catch (e: Exception) { tmpFile.delete(); EventLog.log("sync", "Decrypt failed: ${e.message}"); val dedupKey = "${cryptoService.fileIdHash(subscription.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); return@withLock }
+                    tmpFile.writeBytes(compressed)
+                    val internalFile = fileService.getFile(subscription.fileId, newVersion)
+                    try { fileService.decompressFile(tmpFile, internalFile); tmpFile.delete() } catch (e: Exception) { EventLog.log("sync", "Decompression failed for ${subscription.fileId}: ${e.message}"); tmpFile.delete(); internalFile.delete(); downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1; return@withLock }
+                    val receivedHash = cryptoService.sha256Hex(internalFile.readBytes())
+                    if (receivedHash != hashHex) { internalFile.delete(); downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1; EventLog.log("sync", "Hash mismatch after transfer of ${subscription.fileId} - discarded"); return@withLock }
+                    downloadRetryCount.remove(subscription.fileId)
+                    val probeKey = "$deviceAddress:${cryptoService.fileIdHash(subscription.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"
+                    lastProbeAt[probeKey] = System.currentTimeMillis()
+                    val resolvedFileName = metaPayload.fileName.takeIf { it.isNotBlank() } ?: subscription.fileName ?: "File"
+                    subscriptionDao.updateReceived(subscription.fileId, newVersion, internalFile.absolutePath, newVersion, System.currentTimeMillis(), resolvedFileName)
+                    fileService.evictOldVersions(subscription.fileId, newVersion)
+                    if (subscription.localVersion == null) EventLog.log("sync", "File \"$resolvedFileName\" downloaded!") else EventLog.log("sync", "File \"$resolvedFileName\" updated from v${subscription.localVersion} to v$newVersion!")
+                    if (subscription.lastNotifiedVersion == null || subscription.lastNotifiedVersion < newVersion) {
+                        notificationService.showUpdateNotification(resolvedFileName, subscription.fileId, subscription.localVersion ?: 0, newVersion)
+                        subscriptionDao.updateLastNotified(subscription.fileId, newVersion)
                     }
-                }
-            } catch (e: Exception) {
-                EventLog.log("ble", "fetchFile error: ${e.message}"); false
-            }
-            EventLog.log("ble", "After fetchFile: transferred=$transferred, tmpFile.exists()=${tmpFile.exists()}, tmpFile.length()=${tmpFile.length()}")
-            if (!transferred) {
-                tmpFile.delete()
-                downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
-                val dedupKey = "${cryptoService.fileIdHash(subscription.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"
-                dedupCache.remove(dedupKey)
-                EventLog.log("sync", "Transfer failed for ${subscription.fileId} (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)"); return@withTimeout
-            }
-            if (!tmpFile.isFile || tmpFile.length() != metaPayload.fileSize) {
-                EventLog.log("sync", "Downloaded file size mismatch for ${subscription.fileId}: ${tmpFile.length()}/${metaPayload.fileSize}B")
-                tmpFile.delete()
-                downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
-                val dedupKey = "${cryptoService.fileIdHash(subscription.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"
-                dedupCache.remove(dedupKey)
-                EventLog.log("sync", "Transfer failed for ${subscription.fileId} (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)")
-                return@withTimeout
-            }
-            val encrypted = tmpFile.readBytes()
-            val persistedEnvelope = File(fileService.getVersionDir(subscription.fileId, newVersion), "file.encrypted")
-            persistedEnvelope.parentFile?.mkdirs()
-            persistedEnvelope.writeBytes(encrypted)
-            EventLog.log("sync", "Persisted original encrypted envelope ${persistedEnvelope.absolutePath} (${persistedEnvelope.length()}B)")
-            val compressed = try {
-                cryptoService.decryptCompressed(encrypted, cryptoService.publicKeyFromBase64(subscription.publicKey))
-            } catch (e: Exception) { tmpFile.delete(); EventLog.log("sync", "Decrypt failed: ${e.message}"); val dedupKey = "${cryptoService.fileIdHash(subscription.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"; dedupCache.remove(dedupKey); return@withTimeout }
-            tmpFile.writeBytes(compressed)
-            val internalFile = fileService.getFile(subscription.fileId, newVersion)
-            try {
-                fileService.decompressFile(tmpFile, internalFile)
-                tmpFile.delete()
-            } catch (e: Exception) {
-                EventLog.log("sync", "Decompression failed for ${subscription.fileId}: ${e.message}")
-                tmpFile.delete(); internalFile.delete()
-                downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
-                EventLog.log("sync", "Transfer failed for ${subscription.fileId} (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)")
-                return@withTimeout
-            }
-            val receivedHash = cryptoService.sha256Hex(internalFile.readBytes())
-            if (receivedHash != hashHex) {
-                internalFile.delete()
-                downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
-                EventLog.log("sync", "Hash mismatch after transfer of ${subscription.fileId} - discarded (retry ${downloadRetryCount[subscription.fileId]}/$maxRetries)")
-                return@withTimeout
-            }
-            // Success - clear retry count and write probe cooldown
-            downloadRetryCount.remove(subscription.fileId)
-            val probeKey = "$deviceAddress:${cryptoService.fileIdHash(subscription.fileId).joinToString("") { "%02x".format(it) }}:$newVersion"
-            lastProbeAt[probeKey] = System.currentTimeMillis()
-            EventLog.log("sync", "Committed ${internalFile.absolutePath} (${internalFile.length()}B) for subscription v$newVersion")
-            val resolvedFileName = metaPayload.fileName.takeIf { it.isNotBlank() } ?: subscription.fileName
-            if (metaPayload.fileName.isNotBlank() && metaPayload.fileName != subscription.fileName) {
-                EventLog.log("sync", "Filename updated for subscription ${subscription.fileId}: \"${subscription.fileName ?: ""}\" -> \"${metaPayload.fileName}\"")
-            }
-            subscriptionDao.updateReceived(subscription.fileId, newVersion, internalFile.absolutePath, newVersion, System.currentTimeMillis(), resolvedFileName)
-            val persisted = subscriptionDao.getById(subscription.fileId)
-            if (persisted == null || persisted.localVersion != newVersion) {
-                // Diagnostic only: updateReceived either commits or throws, but a
-                // stale read here would explain a reverted UI version.
-                EventLog.log("sync", "WARNING: subscription row not at v$newVersion after update (found v${persisted?.localVersion})")
-            }
-            fileService.evictOldVersions(subscription.fileId, newVersion)
-            EventLog.log("sync", "Old versions evicted; current file remains ${internalFile.length()}B")
-            val displayName = resolvedFileName ?: subscription.fileId
-            if (subscription.localVersion == null) {
-                EventLog.log("sync", "File \"$displayName\" downloaded!")
-            } else {
-                EventLog.log("sync", "File \"$displayName\" updated from version ${subscription.localVersion} to version $newVersion!")
-            }
-            val shouldNotify = subscription.lastNotifiedVersion == null || subscription.lastNotifiedVersion < newVersion
-            if (shouldNotify) {
-                notificationService.showUpdateNotification(resolvedFileName ?: "File", subscription.fileId, subscription.localVersion ?: 0, newVersion)
-                subscriptionDao.updateLastNotified(subscription.fileId, newVersion)
-            }
-            // Become a relay: register as broadcast and advertise the same triple.
-            val relayPayload = ByteArray(14)
-            cryptoService.fileIdHash(subscription.fileId).copyInto(relayPayload, 0)
-            relayPayload[6] = ((newVersion ushr 24) and 0xFF).toByte(); relayPayload[7] = ((newVersion ushr 16) and 0xFF).toByte()
-            relayPayload[8] = ((newVersion ushr 8) and 0xFF).toByte(); relayPayload[9] = (newVersion and 0xFF).toByte()
-            cryptoService.keyId(subscription.publicKey).copyInto(relayPayload, 10)
-            broadcastDao.upsert(BroadcastEntity(subscription.fileId, resolvedFileName ?: "File", subscription.relayName ?: subscription.fileId.take(8), "application/octet-stream", internalFile.absolutePath, Base64.getEncoder().encodeToString(metaPayload.fileHash), internalFile.length(), metaPayload.fileSize, newVersion, subscription.publicKey, null, "", Role.RELAY, subscription.subscribedAt, System.currentTimeMillis()))
-            blePeripheralService.startAdvertising(subscription.fileId, relayPayload)
-            EventLog.log("adv", "Relaying \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
-            onFileReceived?.invoke(subscription.fileId, newVersion)
-            downloadResult = true
-            }
-        } catch (e: TimeoutCancellationException) {
-            EventLog.log("sync", "Download timed out for ${subscription.fileId} (retry ${downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1}/$maxRetries)")
-            downloadRetryCount[subscription.fileId] = downloadRetryCount.getOrDefault(subscription.fileId, 0) + 1
-        } catch (e: Exception) {
-            Log.e(TAG, "Error fetching sub update ${subscription.fileId}", e)
-            EventLog.log("sync", "Error fetching sub update ${subscription.fileId}: ${e.message}")
-        } finally {
-            if (!downloadResult) {
+                    val relayPayload = ByteArray(14)
+                    cryptoService.fileIdHash(subscription.fileId).copyInto(relayPayload, 0)
+                    relayPayload[6] = ((newVersion ushr 24) and 0xFF).toByte(); relayPayload[7] = ((newVersion ushr 16) and 0xFF).toByte()
+                    relayPayload[8] = ((newVersion ushr 8) and 0xFF).toByte(); relayPayload[9] = (newVersion and 0xFF).toByte()
+                    cryptoService.keyId(subscription.publicKey).copyInto(relayPayload, 10)
+                    broadcastDao.upsert(BroadcastEntity(subscription.fileId, resolvedFileName, subscription.relayName ?: subscription.fileId.take(8), "application/octet-stream", internalFile.absolutePath, Base64.getEncoder().encodeToString(metaPayload.fileHash), internalFile.length(), metaPayload.fileSize, newVersion, subscription.publicKey, null, "", Role.RELAY, subscription.subscribedAt, System.currentTimeMillis()))
+                    blePeripheralService.startAdvertising(subscription.fileId, relayPayload)
+                    EventLog.log("adv", "Relaying \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")
+                    onFileReceived?.invoke(subscription.fileId, newVersion)
+                    downloadResult = true
+                } catch (e: Exception) { Log.e(TAG, "Error fetching sub update ${subscription.fileId}", e); EventLog.log("sync", "Error fetching sub update ${subscription.fileId}: ${e.message}") }
+                activeDownloadPeers.remove(deviceAddress)
                 _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId
                 _downloadProgress.value = _downloadProgress.value - subscription.fileId
                 downloadingFileDeviceMap.remove(subscription.fileId)
                 activeDownloadJobs.remove(subscription.fileId)
-                EventLog.log("sync", "Removed ${subscription.fileId.takeLast(8)} from downloadingFileIds (finally, now: ${_downloadingFileIds.value.size})")
-                resumeAdvertisingAndScanning()
-            }
-        }
-        if (!downloadResult) {
-            return false
-        }
-        activeDownloadPeers.remove(deviceAddress)
-        _downloadingFileIds.value = _downloadingFileIds.value - subscription.fileId
-        _downloadProgress.value = _downloadProgress.value - subscription.fileId
-        downloadingFileDeviceMap.remove(subscription.fileId)
-        activeDownloadJobs.remove(subscription.fileId)
-        EventLog.log("sync", "Removed ${subscription.fileId.takeLast(8)} from downloadingFileIds (now: ${_downloadingFileIds.value.size})")
+                EventLog.log("sync", "Removed ${subscription.fileId.takeLast(8)} from downloadingFileIds (now: ${_downloadingFileIds.value.size})")
+            } // peerLock
+        } // transferSemaphore - semaphore released here
         resumeAdvertisingAndScanning()
-        return true
-        } // peerLock
-        }
+        return downloadResult
     }
 
     fun stopAdvertisingForFile(fileId: String) {
@@ -701,6 +684,27 @@ class SyncEngine(
         _downloadProgress.value = _downloadProgress.value - fileId
         blePeripheralService.stopStreaming(fileId)
         resumeAdvertisingAndScanning()
+    }
+
+    private fun cancelAllTransfersForCongestion() {
+        EventLog.log("sync", "Cancelling all transfers due to congestion")
+        val fileIds = _downloadingFileIds.value.toList()
+        for (fileId in fileIds) {
+            activeDownloadJobs.remove(fileId)?.cancel()
+            downloadingFileDeviceMap.remove(fileId)?.let { address ->
+                bleCentralService.disconnectDevice(address)
+            }
+            _downloadingFileIds.value = _downloadingFileIds.value - fileId
+            _downloadProgress.value = _downloadProgress.value - fileId
+        }
+        activeDownloadJobs.clear()
+        downloadingFileDeviceMap.clear()
+        activeDownloadPeers.clear()
+        activeUploadPeers.forEach { address ->
+            blePeripheralService.disconnectPeer(address)
+        }
+        activeUploadPeers.clear()
+        stopAdvertisingAndScanning()
     }
 
     /**

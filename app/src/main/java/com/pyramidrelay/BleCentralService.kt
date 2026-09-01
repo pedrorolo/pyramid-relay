@@ -42,6 +42,7 @@ class BleCentralService(private val context: Context) {
     private val activeGattConnections = java.util.concurrent.ConcurrentHashMap<String, BluetoothGatt>()
     private val metaLocks = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
     var onDeviceDiscovered: ((deviceAddress: String, serviceData: ByteArray) -> Unit)? = null
+    var onCongestionDetected: (() -> Unit)? = null
 
     @SuppressLint("MissingPermission")
     fun startScan() {
@@ -111,10 +112,12 @@ class BleCentralService(private val context: Context) {
         // Samsung BLE connections frequently fail on the first attempt (status !=
         // GATT_SUCCESS). Retry a few times before giving up.
         var lastStatus = -1
-        val retryDelayMs = 1500L
+        var metaNotFound = false
+        val baseRetryDelayMs = 3000L
         repeat(5) { attempt ->
             val attemptNo = attempt + 1
             val deferred = CompletableDeferred<BleMetaPayload?>()
+            var gattRef: BluetoothGatt? = null
             val gattCallback = object : BluetoothGattCallback() {
                 override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
                     lastStatus = status
@@ -127,6 +130,8 @@ class BleCentralService(private val context: Context) {
                         if (!gatt.requestMtu(512)) gatt.discoverServices()
                     } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
                         EventLog.log("ble", "GATT disconnected from ${deviceAddress.takeLast(5)} (attempt $attemptNo, status=$status)")
+                        if (status == 147) onCongestionDetected?.invoke()
+                        gattRef = null
                         deferred.complete(null); gatt.disconnect(); gatt.close()
                     }
                 }
@@ -147,13 +152,13 @@ class BleCentralService(private val context: Context) {
                         }
                     }
                     val metaChar = gatt.getService(SERVICE_UUID)?.getCharacteristic(META_UUID)
-                    if (metaChar != null) gatt.readCharacteristic(metaChar) else { EventLog.log("ble", "META characteristic not found on ${deviceAddress.takeLast(5)}"); deferred.complete(null) }
+                    if (metaChar != null) gatt.readCharacteristic(metaChar) else { EventLog.log("ble", "META characteristic not found on ${deviceAddress.takeLast(5)}"); metaNotFound = true; deferred.complete(null) }
                 }
                 override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
                     if (characteristic.uuid == STREAM_UUID) {
                         if (status == BluetoothGatt.GATT_SUCCESS) {
                             val metaChar = gatt.getService(SERVICE_UUID)?.getCharacteristic(META_UUID)
-                            if (metaChar != null) gatt.readCharacteristic(metaChar) else { deferred.complete(null) }
+                            if (metaChar != null) gatt.readCharacteristic(metaChar) else { metaNotFound = true; deferred.complete(null) }
                         } else {
                             EventLog.log("ble", "SELECT rejected ($status) for ${deviceAddress.takeLast(5)}")
                             deferred.complete(null); gatt.disconnect(); gatt.close()
@@ -171,11 +176,22 @@ class BleCentralService(private val context: Context) {
             if (gatt == null) {
                 EventLog.log("ble", "GATT connect returned null for ${deviceAddress.takeLast(5)} (attempt $attemptNo)")
                 deferred.complete(null)
+            } else {
+                gattRef = gatt
             }
             EventLog.log("ble", "GATT connect to ${deviceAddress.takeLast(5)} for meta read (attempt $attemptNo)")
-            val result = try { withTimeout(90_000L) { deferred.await() } } catch (e: Exception) { Log.e(TAG, "Timeout reading meta from $deviceAddress", e); EventLog.log("ble", "Meta read TIMED OUT from ${deviceAddress.takeLast(5)} (attempt $attemptNo)"); null }
-            if (result != null) return result
-            if (attempt < 4) kotlinx.coroutines.delay(retryDelayMs)
+            try {
+                val result = try { withTimeout(45_000L) { deferred.await() } } catch (e: Exception) { Log.e(TAG, "Timeout reading meta from $deviceAddress", e); EventLog.log("ble", "Meta read TIMED OUT from ${deviceAddress.takeLast(5)} (attempt $attemptNo)"); null }
+                if (metaNotFound) { EventLog.log("ble", "META not found - aborting immediately"); return null }
+                if (result != null) return result
+            } finally {
+                gattRef?.let { try { it.disconnect(); it.close() } catch (_: Exception) {} }
+                gattRef = null
+            }
+            if (attempt < 4) {
+                val jitter = (Math.random() * 5_000).toLong()
+                kotlinx.coroutines.delay(baseRetryDelayMs + jitter)
+            }
         }
         EventLog.log("ble", "Meta read FAILED after 5 attempts for ${deviceAddress.takeLast(5)} (last status=$lastStatus)")
         return null
@@ -219,7 +235,8 @@ class BleCentralService(private val context: Context) {
                 if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
                     if (!gatt.requestMtu(517)) gatt.discoverServices()
                 } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
-                    EventLog.log("ble", "fetchFile: disconnected with ${buffer.size()}B received")
+                    EventLog.log("ble", "fetchFile: disconnected with ${buffer.size()}B received (status=$status)")
+                    if (status == 147) onCongestionDetected?.invoke()
                     if (!deferred.isCompleted) {
                         // Write whatever we received to the output
                         try { 
@@ -266,7 +283,7 @@ class BleCentralService(private val context: Context) {
                     if (!deferred.isCompleted) {
                         EventLog.log("ble", "fetchFile: inactivity timeout (30s) — aborting")
                         deferred.complete(false)
-                        gatt.disconnect()
+                        gatt.disconnect(); gatt.close(); gattRef = null
                     }
                 }
             }
@@ -275,14 +292,15 @@ class BleCentralService(private val context: Context) {
                     if (status != BluetoothGatt.GATT_SUCCESS) {
                         EventLog.log("ble", "fetchFile: PULL write rejected (status=$status)")
                         deferred.complete(false)
+                        gatt.disconnect(); gatt.close(); gattRef = null
                     } else {
-                        // Start first-chunk timeout: if no data arrives in 15s, abort
+                        // Start first-chunk timeout: if no data arrives in 30s, abort
                         scope.launch {
-                            delay(15_000L)
+                            delay(30_000L)
                             if (buffer.size() == 0 && !deferred.isCompleted) {
-                                EventLog.log("ble", "fetchFile: first chunk timeout (15s) — aborting")
+                                EventLog.log("ble", "fetchFile: first chunk timeout (30s) — aborting")
                                 deferred.complete(false)
-                                gatt.disconnect()
+                                gatt.disconnect(); gatt.close(); gattRef = null
                             }
                         }
                         resetInactivityTimer(gatt)
@@ -296,6 +314,7 @@ class BleCentralService(private val context: Context) {
                 buffer.write(value)
                 val got = buffer.size()
                 onProgress?.invoke(got.toLong(), expectedSize)
+                EventLog.log("ble", "Progress: $got/$expectedSize B for ${gatt.device?.address?.takeLast(5)}")
                 if ((got - value.size) / 40_720 != got / 40_720 || got.toLong() == expectedSize)
                     EventLog.log("ble", "Downloading... $got/$expectedSize B")
                 if (value.isEmpty() || got >= expectedSize) {
@@ -321,11 +340,16 @@ class BleCentralService(private val context: Context) {
         EventLog.log("ble", "GATT fetchFile v$version ($expectedSize B) from ${deviceAddress.takeLast(5)}")
         // 60s handshake + worst-case 5 KB/s transfer budget (resilient to poor connections)
         val timeoutMs = 60_000L + expectedSize * 1000L / 5_000L
-        val ok = try { withTimeout(timeoutMs) { deferred.await() } } catch (e: Exception) {
-            EventLog.log("ble", "fetchFile TIMED OUT after ${timeoutMs / 1000}s (${buffer.size()}/$expectedSize B) from ${deviceAddress.takeLast(5)}")
-            false
+        val ok = try {
+            try { withTimeout(timeoutMs) { deferred.await() } } catch (e: Exception) {
+                EventLog.log("ble", "fetchFile TIMED OUT after ${timeoutMs / 1000}s (${buffer.size()}/$expectedSize B) from ${deviceAddress.takeLast(5)}")
+                false
+            }
+        } finally {
+            gattRef?.let { try { it.disconnect(); it.close() } catch (_: Exception) {} }
+            gattRef = null
+            activeGattConnections.remove(deviceAddress)
         }
-        gattRef?.let { try { it.disconnect(); it.close() } catch (_: Exception) {} }
         EventLog.log("ble", "fetchFile ${if (ok && buffer.size().toLong() == expectedSize) "COMPLETE" else "INCOMPLETE"} (${buffer.size()}/$expectedSize B)")
         return ok && buffer.size().toLong() == expectedSize
     }
