@@ -127,7 +127,7 @@ class BleCentralService(private val context: Context) {
                         if (!gatt.requestMtu(512)) gatt.discoverServices()
                     } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
                         EventLog.log("ble", "GATT disconnected from ${deviceAddress.takeLast(5)} (attempt $attemptNo, status=$status)")
-                        deferred.complete(null); gatt.close()
+                        deferred.complete(null); gatt.disconnect(); gatt.close()
                     }
                 }
 
@@ -232,7 +232,7 @@ class BleCentralService(private val context: Context) {
                         deferred.complete(false)
                     }
                     activeGattConnections.remove(deviceAddress)
-                    gatt.close()
+                    gatt.disconnect(); gatt.close()
                 }
             }
             override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) { gatt.discoverServices() }
