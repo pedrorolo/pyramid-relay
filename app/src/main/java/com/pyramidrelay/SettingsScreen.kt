@@ -23,6 +23,30 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import android.text.method.LinkMovementMethod
+import android.widget.TextView
+import io.noties.markwon.Markwon
+import io.noties.markwon.ext.tables.TablePlugin
+
+@Composable
+private fun MarkdownText(text: String, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val markwon = remember {
+        Markwon.builder(context)
+            .usePlugin(TablePlugin.create(context))
+            .build()
+    }
+    AndroidView(
+        modifier = modifier,
+        factory = { ctx ->
+            TextView(ctx).apply {
+                movementMethod = LinkMovementMethod.getInstance()
+            }
+        },
+        update = { tv -> markwon.setMarkdown(tv, text) }
+    )
+}
 
 @Composable
 fun SettingsScreen(modifier: Modifier = Modifier) {
@@ -174,9 +198,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             title = { Text("Open Source Licenses") },
             text = {
                 Box(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    Text(
+                    MarkdownText(
                         text = licensesText,
-                        style = MaterialTheme.typography.bodySmall
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             },
@@ -192,9 +216,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             title = { Text("End User License Agreement") },
             text = {
                 Box(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    Text(
+                    MarkdownText(
                         text = eulaText,
-                        style = MaterialTheme.typography.bodySmall
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             },
@@ -210,9 +234,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             title = { Text("Privacy Policy") },
             text = {
                 Box(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    Text(
+                    MarkdownText(
                         text = privacyText,
-                        style = MaterialTheme.typography.bodySmall
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             },
@@ -228,9 +252,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             title = { Text("License") },
             text = {
                 Box(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    Text(
+                    MarkdownText(
                         text = licenseText,
-                        style = MaterialTheme.typography.bodySmall
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             },
@@ -246,9 +270,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             title = { Text("README") },
             text = {
                 Box(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    Text(
+                    MarkdownText(
                         text = readmeText,
-                        style = MaterialTheme.typography.bodySmall
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             },

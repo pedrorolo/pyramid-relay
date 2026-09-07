@@ -129,6 +129,7 @@ dependencies {
     implementation(libs.mlkit.barcode.scanning)
     implementation(libs.zxing.android.embedded)
     implementation(libs.markwon.core)
+    implementation(libs.markwon.table)
 
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.kotlinx.coroutines.android)
