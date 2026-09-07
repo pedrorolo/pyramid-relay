@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Share
@@ -327,7 +328,7 @@ fun BroadcastsScreen(
                                 Spacer(modifier = Modifier.height(4.dp))
                                  val fileExt = broadcast.fileName.substringAfterLast('.', "").lowercase()
                                  val hasViewer = getViewerFor(broadcast.fileName) != null
-                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+                                  FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
                                      IconButton(onClick = {
                                          val pkBytes = try { Base64.getDecoder().decode(broadcast.publicKey) } catch (e: Exception) { Base64.getUrlDecoder().decode(broadcast.publicKey) }
                                          val pkUrl = Base64.getUrlEncoder().withoutPadding().encodeToString(pkBytes)
