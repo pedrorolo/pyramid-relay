@@ -226,6 +226,11 @@ class SyncEngine(
                 resumeAdvertisingAndScanning()
             }
             blePeripheralService.onStreamArmed = { stopAdvertisingAndScanning() }
+            // Budget coordination: the peripheral may drop WANT ads when the device hits its
+            // advertising-set limit. Drop from our bookkeeping so we can retry, and re-attempt
+            // deferred WANT ads whenever a slot frees up.
+            blePeripheralService.onWantDropped = { fileId -> advertisedWants.remove(fileId) }
+            blePeripheralService.onAdvertisingSlotFreed = { scope.launch { reAdvertiseWants() } }
             // Incoming "push": a peer delivers a file to us because we advertised
             // "I WANT" but are not scanning (e.g. screen off). Lock the shared
             // transfer mutex so only one transfer (push or pull) happens at a time.
@@ -263,10 +268,7 @@ class SyncEngine(
             } catch (e: Exception) { Log.e(TAG, "Initial broadcast load failed", e) }
             // Also advertise "I WANT" for existing subscriptions so screen-off senders can push.
             try {
-                val subs = subscriptionDao.getAll()
-                for (s in subs) {
-                    try { startWantAdvertising(s) } catch (e: Exception) { Log.e(TAG, "startWantAdvertising failed", e) }
-                }
+                reAdvertiseWants()
             } catch (e: Exception) { Log.e(TAG, "Initial subscription WANT load failed", e) }
             // Watch for future changes
             launch {
@@ -305,11 +307,7 @@ class SyncEngine(
                                 EventLog.log("adv", "Stopped WANT ad for removed subscription $id")
                             }
                         }
-                        for (s in subs) {
-                            if (s.fileId !in advertisedWants) {
-                                try { startWantAdvertising(s) } catch (e: Exception) { Log.e(TAG, "startWantAdvertising failed", e); EventLog.log("ble", "startWantAdvertising failed: ${e.message}") }
-                            }
-                        }
+                        reAdvertiseWants()
                     } } catch (e: Exception) { Log.e(TAG, "subscription WANT watcher failed", e) }
                 }
             }
@@ -495,9 +493,20 @@ class SyncEngine(
             blePeripheralService.getDeviceUuidBytes()
         )
         val serviceData = metaPayload.toBytes()
-        blePeripheralService.startWantAdvertising(subscription.fileId, serviceData)
-        advertisedWants.add(subscription.fileId)
-        EventLog.log("adv", "Advertising WANT \"${subscription.fileName ?: subscription.fileId.take(8)}\" (have v${subscription.localVersion ?: 0})")
+        val started = blePeripheralService.startWantAdvertising(subscription.fileId, serviceData)
+        if (started) advertisedWants.add(subscription.fileId)
+        EventLog.log("adv", "Advertising WANT \"${subscription.fileName ?: subscription.fileId.take(8)}\" (have v${subscription.localVersion ?: 0})${if (started) "" else " - SKIPPED (capacity)"}")
+    }
+
+    private suspend fun reAdvertiseWants() {
+        try {
+            val subs = subscriptionDao.getAll()
+            for (s in subs) {
+                if (s.fileId !in advertisedWants) {
+                    try { startWantAdvertising(s) } catch (e: Exception) { Log.e(TAG, "startWantAdvertising failed", e); EventLog.log("ble", "startWantAdvertising failed: ${e.message}") }
+                }
+            }
+        } catch (e: Exception) { Log.e(TAG, "reAdvertiseWants failed", e) }
     }
 
     /**

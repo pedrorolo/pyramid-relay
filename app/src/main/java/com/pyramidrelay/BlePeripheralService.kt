@@ -53,6 +53,12 @@ class BlePeripheralService(private val context: Context, private val transferMut
     // simultaneously. Up to 255B per set (LE 1M PHY, non-legacy).
     private val advertisingSets = java.util.concurrent.ConcurrentHashMap<String, AdvertisingSet>()
     private val advertisingCallback = java.util.concurrent.ConcurrentHashMap<String, AdvertisingSetCallback>()
+    private var maxAdvertisingSets = 0
+    // A WANT (receive) ad could not be kept active (e.g. device hit its advertising-set
+    // limit). The owner should drop it from its "advertised" bookkeeping so it can retry later.
+    var onWantDropped: ((fileId: String) -> Unit)? = null
+    // A hardware advertising slot just freed; the owner should re-attempt any deferred WANT ads.
+    var onAdvertisingSlotFreed: (() -> Unit)? = null
     // Each central keeps its own selected file; multiple peers may be connected.
     private val selectedFileByCentral = java.util.concurrent.ConcurrentHashMap<String, String>()
     // Maps 6-byte fileIdHash hex -> fileId so the central can SELECT which file to serve.
@@ -594,23 +600,55 @@ class BlePeripheralService(private val context: Context, private val transferMut
     }
 
     @SuppressLint("MissingPermission")
-    fun startAdvertising(fileId: String, serviceData: ByteArray) {
-        startAdvertisingSetInternal(fileId, SERVICE_UUID, serviceData, true)
+    fun startAdvertising(fileId: String, serviceData: ByteArray): Boolean {
+        return startAdvertisingSetInternal(fileId, SERVICE_UUID, serviceData, true)
     }
 
     /** Advertises "I WANT <file>" under the WANT UUID so screen-off senders can discover and push. */
     @SuppressLint("MissingPermission")
-    fun startWantAdvertising(fileId: String, serviceData: ByteArray) {
-        startAdvertisingSetInternal("want:$fileId", WANT_UUID, serviceData, false)
+    fun startWantAdvertising(fileId: String, serviceData: ByteArray): Boolean {
+        return startAdvertisingSetInternal("want:$fileId", WANT_UUID, serviceData, false)
     }
 
-    private fun startAdvertisingSetInternal(tag: String, serviceUuid: UUID, serviceData: ByteArray, registerHash: Boolean) {
-        if (advertisingSets.containsKey(tag)) return
+    private fun getMaxAdvertisingSets(): Int {
+        if (maxAdvertisingSets <= 0) {
+            // The SDK does not reliably expose the per-device limit, so we start with a
+            // conservative cap and shrink it at runtime if the controller rejects a start
+            // with ADVERTISE_FAILED_TOO_MANY_ADVERTISERS.
+            maxAdvertisingSets = 5
+            EventLog.log("ble", "Using advertising-set cap: $maxAdvertisingSets (self-adjusting)")
+        }
+        return maxAdvertisingSets
+    }
+
+    private fun startAdvertisingSetInternal(tag: String, serviceUuid: UUID, serviceData: ByteArray, registerHash: Boolean): Boolean {
+        if (advertisingSets.containsKey(tag)) return true
         val adv = adapter?.bluetoothLeAdvertiser ?: run {
             EventLog.log("ble", "BLE advertiser not available")
-            return
+            return false
         }
         advertiser = adv
+        val maxSets = getMaxAdvertisingSets()
+        val isWant = tag.startsWith("want:")
+        if (isWant) {
+            if (advertisingCallback.size >= maxSets) {
+                EventLog.log("ble", "WANT ad skipped (at capacity ${advertisingCallback.size}/$maxSets): $tag")
+                onWantDropped?.invoke(tag.removePrefix("want:"))
+                return false
+            }
+        } else {
+            // Broadcasts (we HAVE a file) outrank WANT ads (we WANT a file). If we are at the
+            // hardware advertising-set limit, evict the oldest WANT ad(s) to free a slot.
+            while (advertisingCallback.size >= maxSets) {
+                val wantTag = advertisingCallback.keys.firstOrNull { it.startsWith("want:") } ?: break
+                val fid = wantTag.removePrefix("want:")
+                EventLog.log("ble", "Capacity $maxSets reached; evicting WANT $wantTag to free slot for broadcast")
+                val cb = advertisingCallback.remove(wantTag)
+                advertisingSets.remove(wantTag)
+                try { adv.stopAdvertisingSet(cb) } catch (_: Exception) {}
+                onWantDropped?.invoke(fid)
+            }
+        }
         if (registerHash) {
             val sha256 = java.security.MessageDigest.getInstance("SHA-256").digest(tag.toByteArray(Charsets.UTF_8))
             val hashHex = sha256.copyOfRange(0, 6).joinToString("") { "%02x".format(it) }
@@ -635,11 +673,23 @@ class BlePeripheralService(private val context: Context, private val transferMut
                     EventLog.log("ble", "Extended advertising started: $tag (txPower=$txPower)")
                 } else {
                     EventLog.log("ble", "Extended advertising failed: $tag (status=$status)")
+                    advertisingCallback.remove(tag)
+                    // If the controller is out of advertising sets, shrink our cap so we stop
+                    // trying to exceed it (and free room for higher-priority broadcasts).
+                    if (status == AdvertisingSetCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS) {
+                        val newCap = if (advertisingCallback.size < 1) 1 else advertisingCallback.size
+                        if (newCap < maxAdvertisingSets) {
+                            maxAdvertisingSets = newCap
+                            EventLog.log("ble", "Advertising-set cap reduced to $maxAdvertisingSets (controller rejected start)")
+                        }
+                    }
+                    if (tag.startsWith("want:")) onWantDropped?.invoke(tag.removePrefix("want:"))
                 }
             }
             override fun onAdvertisingSetStopped(advertisingSet: AdvertisingSet?) {
                 advertisingSets.remove(tag)
                 EventLog.log("ble", "Advertising stopped: $tag")
+                onAdvertisingSlotFreed?.invoke()
             }
         }
         advertisingCallback[tag] = callback
@@ -648,7 +698,11 @@ class BlePeripheralService(private val context: Context, private val transferMut
             EventLog.log("ble", "Starting extended advertising: $tag (${serviceData.size}B service data)")
         } catch (e: Exception) {
             EventLog.log("ble", "Failed to start extended advertising: ${e.message}")
+            advertisingCallback.remove(tag)
+            if (tag.startsWith("want:")) onWantDropped?.invoke(tag.removePrefix("want:"))
+            return false
         }
+        return true
     }
 
     @SuppressLint("MissingPermission")
