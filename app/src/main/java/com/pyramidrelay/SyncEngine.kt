@@ -456,7 +456,11 @@ class SyncEngine(
             }
         }
         val encryptedSize = if (encryptedFile.exists()) encryptedFile.length() else broadcast.compressedSize
-        val metaPayload = BleMetaPayload(fileIdBytes, broadcast.version, hashBytes, encryptedSize, broadcast.fileName, keyId, blePeripheralService.getDeviceUuidBytes())
+        // The file name is intentionally omitted from the *advertisement*: it leaks the file's
+        // name to everyone in BLE range. The real name is still served to connected peers via the
+        // GATT META characteristic (buildMetaPayload) and in the push header, so receivers learn it
+        // at transfer time without broadcasting it.
+        val metaPayload = BleMetaPayload(fileIdBytes, broadcast.version, hashBytes, encryptedSize, "", keyId, blePeripheralService.getDeviceUuidBytes())
         val serviceData = metaPayload.toBytes()
         // Ensure compressed file is cached before advertising
         if (broadcast.compressedSize == 0L || broadcast.compressedSize == broadcast.fileSize) {
@@ -488,7 +492,11 @@ class SyncEngine(
             subscription.localVersion ?: 0,
             ByteArray(32),
             0,
-            subscription.fileName ?: "",
+            // Intentionally blank: the WANT beacon only needs to signal interest in a file
+            // (fileId + keyId + local version). The real file name is learned at transfer
+            // time, either from the META characteristic (pull) or the push header (push), so
+            // we avoid broadcasting the file name (and its content hint) over the air.
+            "",
             keyId,
             blePeripheralService.getDeviceUuidBytes()
         )
@@ -966,7 +974,9 @@ class SyncEngine(
                     }
                     val relayFileIdBytes = uuidToBytes(subscription.fileId) ?: return@withLock
                     val relayKeyId = cryptoService.keyId(subscription.publicKey)
-                    val relayMetaPayload = BleMetaPayload(relayFileIdBytes, newVersion, metaPayload.fileHash, metaPayload.fileSize, resolvedFileName, relayKeyId, blePeripheralService.getDeviceUuidBytes())
+                    // Name is omitted from the relay *advertisement* for privacy; the stored
+                    // BroadcastEntity (and the GATT META read / push header) still carry it.
+                    val relayMetaPayload = BleMetaPayload(relayFileIdBytes, newVersion, metaPayload.fileHash, metaPayload.fileSize, "", relayKeyId, blePeripheralService.getDeviceUuidBytes())
                     broadcastDao.upsert(BroadcastEntity(subscription.fileId, resolvedFileName, subscription.relayName ?: subscription.fileId.take(8), "application/octet-stream", internalFile.absolutePath, Base64.getEncoder().encodeToString(metaPayload.fileHash), internalFile.length(), metaPayload.fileSize, newVersion, subscription.publicKey, null, "", Role.RELAY, subscription.subscribedAt, System.currentTimeMillis()))
                     blePeripheralService.startAdvertising(subscription.fileId, relayMetaPayload.toBytes())
                     EventLog.log("adv", "Relaying \"${subscription.fileName ?: subscription.fileId}\" v$newVersion")

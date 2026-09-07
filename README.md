@@ -56,7 +56,10 @@ without any network infrastructure.
 ### Subscribing
 
 1. Scan a QR code or paste a share link (which carries the file ID and the public key).
-2. Your device connects over BLE GATT and reads the file metadata.
+2. Your device **advertises a "WANT" beacon** over BLE and also scans for peers. A peer that
+   already has the file discovers your beacon (or you discover its broadcast), connects over BLE
+   GATT, and pushes the encrypted file to you — including when your screen is off, since BLE
+   advertising survives while scanning does not.
 3. If a newer version is available, the file is downloaded and verified.
 4. The file is saved and automatically re-advertised to other peers (relay mode).
 
@@ -79,8 +82,11 @@ of what they distribute.
 Pyramid Relay is a single-activity Jetpack Compose app. The transfer layer is built entirely
 on the Android BLE GATT stack:
 
-- **`BlePeripheralService`** — GATT server. One advertising set per file; each carries the full
-  META payload as service data, and streams the encrypted file via notifications.
+- **`BlePeripheralService`** — GATT server. Advertises two kinds of beacon — a **HAVE** beacon
+  per broadcast/relay (service UUID `…6d38`) and a **WANT** beacon per subscription
+  (service UUID `…6d39`) — each carrying a small META payload as service data. It also exposes an
+  **INCOMING** characteristic so a peer can push a file to a device that only advertised WANT (e.g.
+  screen off), and streams the encrypted file to connected peers via notifications.
 - **`BleCentralService`** — GATT client. Connects, reads META, and streams the file with
   credit-based flow control and **resumable** transfers (a stalled download resumes from the
   last received byte).

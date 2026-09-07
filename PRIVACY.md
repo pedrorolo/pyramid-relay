@@ -39,8 +39,12 @@ shared by others via a QR code or a `pyramidrelay://` link.
    QR/link); the **private** key stays in your device's Android Keystore and is never
    transmitted.
 2. **Subscribing.** You scan a QR code or paste a link containing the file ID and the
-   public key. Your device connects to a nearby peer over BLE, verifies the content, and
-   downloads the encrypted file.
+   public key. Your device then **advertises a "WANT" beacon** over BLE announcing that it
+   is looking for that file. A peer that already has the file (and is scanning) discovers the
+   beacon, connects over BLE, verifies the content against the public key, and pushes the
+   encrypted file to you. Advertising this beacon is what lets you keep receiving updates even
+   when your screen is off, because BLE advertising keeps working when Bluetooth scanning does
+   not.
 3. **Relaying.** Once a subscriber receives a file it can automatically re-advertise that
    same encrypted payload to other nearby peers (relay mode). Because a relay already
    holds the **public key** (it scanned the same QR code / link to subscribe), it **can
@@ -78,16 +82,43 @@ This data is **not shared with anyone** by the app. Uninstalling the app removes
 ## 4. Data transmitted over Bluetooth (locally only)
 
 When advertising or scanning, the app exchanges a small **metadata** payload over BLE.
-This payload contains:
+Because **both broadcasters and subscribers advertise**, two kinds of beacon are broadcast:
 
-- a truncated **hash of the file ID** (so peers can match subscriptions),
+- **HAVE beacon** (broadcasts and relays): announces that this device *has* a file.
+- **WANT beacon** (subscriptions): announces that this device *wants* a file. This is what lets a
+  screen-off or non-scanning peer still receive updates, because advertising survives when
+  Bluetooth scanning does not.
+
+Both beacons share the same metadata structure, and **neither beacon includes the file name**:
+
+- the **full file ID** — a 16-byte UUID that uniquely identifies the file (not a truncated hash),
 - the file **version** number,
-- a truncated **hash of the public key** (a key identifier), and
-- the **encrypted file** itself during a transfer.
+- a **key identifier** (the first 4 bytes of the SHA-256 of the public key),
+- a **device identifier** — a 16-byte UUID that is stable for your device, and
+- (no file name — see below).
 
-It does **not** contain your name, contacts, location, or the unencrypted contents of the
-file. These signals travel only between nearby Bluetooth devices and are not routed
-through any server or the internet.
+The file **name is never broadcast**. It is only exchanged after a Bluetooth connection is established:
+the receiver learns it from the GATT **META characteristic** read (pull path) or from the **push header**
+(push path). The subscriber already knows its own file name from the QR code / link, so omitting it from
+the advertisement does not affect functionality.
+
+The HAVE/relay beacon additionally carries the **SHA-256 hash of the file contents** (a 32-byte
+content fingerprint) and the file size; the WANT beacon leaves those fields blank and instead carries
+your device's *current* local version, so a peer holding a newer copy can push it to you.
+
+What this means for your privacy:
+
+- Anyone within Bluetooth range who runs a scanner can read these beacons. A **WANT beacon reveals
+  that your device is interested in a specific file** (by its unique file ID and key identifier) — i.e.
+  it exposes the *content you are looking for*, not only what you already have. The file **name** is not
+  included in any beacon; it is only revealed to a connected peer during an actual transfer.
+- The stable **device identifier** lets a nearby observer **link and track your device** across time
+  and locations, and correlate the files you have and want.
+- The file **contents themselves are never placed in the advertisement**. Only the encrypted
+  envelope is transferred, and only after a GATT connection is established (see Section 2).
+
+These signals travel only between nearby Bluetooth devices and are not routed through any server or
+the internet.
 
 ### Permissions the app uses
 

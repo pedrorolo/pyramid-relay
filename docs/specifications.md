@@ -10,7 +10,7 @@
 Two-tab app (Broadcasts | Subscriptions) via Jetpack Navigation + BottomNavigationView:
 
 - **Originator** picks a file (SAF `ACTION_OPEN_DOCUMENT`), generates `Ed25519` keypair, signs `SHA256(fileId || version || SHA256(file))`, copies file to **app-private isolated store** (`files/store/<fileId>/v<version>/file`), advertises via BLE in background with `version` (and `publicKey` pointer).
-- **Subscriber** scans QR (`pyramidrelay://` deep link with `fileId` + `publicKey`), background-scans BLE; on `advertisedVersion > localVersion` or missing file, fetches via WiFi Direct, verifies signature with advertised `publicKey`, stores internally, shows local notification, then **relays** (re-advertises identically, no private key, only subscriptions screen).
+- **Subscriber** scans QR (`pyramidrelay://` deep link with `fileId` + `publicKey`), then **advertises a WANT beacon** and background-scans BLE; on discovery of a HAVE beacon with `advertisedVersion > localVersion` (or missing file), fetches over BLE GATT, verifies with the advertised `publicKey`, stores internally, shows local notification, then **relays** (re-advertises identically, no private key, only subscriptions screen). A peer that sees the WANT beacon and holds a newer version can also push the file directly to the subscriber (see §8/§10).
 - Both roles keep **only latest verified version** internally. `Save` exports a copy to user-chosen filesystem location (does not affect internal store). Deleting a broadcast stops advertising immediately. Fully offline - no HTTPS.
 
 ## 2. Baseline Audit
@@ -42,7 +42,11 @@ Single-activity (MainActivity) + Jetpack Navigation
          @/ui/qr/QrDisplayDialog.kt, @/ui/qr/QrScanFragment.kt, @/ui/common/
 ```
 
-Single GATT service `APP_SERVICE_UUID` for all filtering. The UUID must be **16-bit** (`0000f47b-0000-1000-8000-00805f9b34fb`, alias `0xF47B`): a 128-bit UUID in a legacy 31B advertisement leaves only 10B for payload (see §8). GATT characteristics stay 128-bit - they never appear in the advertisement.
+Single GATT service `APP_SERVICE_UUID` for all filtering. The app uses **128-bit UUIDs** carried in
+**extended advertising** (LE 1M PHY, non-legacy), so each beacon holds the full META payload:
+`APP_SERVICE_UUID = 00006d38-0000-1000-8000-00805f9b34fb` (HAVE beacons) and
+`APP_WANT_SERVICE_UUID = 00006d39-0000-1000-8000-00805f9b34fb` (WANT beacons). GATT characteristics
+(META, INCOMING) stay 128-bit and never appear in the advertisement (see §8).
 
 ## 4. Data Model
 
@@ -120,15 +124,48 @@ Transfer protocol: subscriber writes `PULL v<n>` to the STREAM characteristic, t
 
 Stream 64KB chunks via `InputStream`/`OutputStream` to avoid OOM; show progress+ETA via `NotificationCompat.Builder.setProgress`.
 
-## 8. BLE - Pointer + GATT
+## 8. BLE - Dual Advertising (HAVE + WANT)
 
-Legacy adv 31B cannot fit `16+4+32+64=116B`. Hint pattern:
+The app uses **Bluetooth LE extended advertising** (LE 1M PHY, non-legacy) so each beacon can
+carry the full META payload. **Both broadcasts and subscriptions are advertised**, as two beacon
+types:
 
-- **Adv 21B total:** `Flags 3B + ServiceData 0x16 AD structure 18B [1B len + 1B type + 2B UUID16 + 14B payload: fileIdHash6B=SHA256(fileId)[0:6] + version4B(BE32) + keyId4B=SHA256(pk)[0:4]]` under `APP_SERVICE_UUID`. (A 128-bit UUID would make the AD structure 32B -> 35B total -> `ADVERTISE_FAILED_DATA_TOO_LARGE`.) **One advertisement instance per broadcast** - 31B cannot hold two service-data entries, and each `startAdvertising` call is an independent advertiser (hardware limit, typically 3-5+, else `ADVERTISE_FAILED_TOO_MANY_ADVERTISERS`).
-- **GATT Server:** `APP_SERVICE_UUID` -> `META_CHAR ~152B [fileId16|version4|pk32|sig64|fileHash32|size4` long read] + `INFO_CHAR`. Peripheral advertises, Central reads.
-- **Scanner:** `BluetoothLeScanner.startScan(filters=[], settings=ScanSettings.SCAN_MODE_LOW_LATENCY)` - **unfiltered**, because some OEM stacks silently drop legacy advertisements carrying 16-bit-UUID service data when filtered via `setServiceUuid`. Match in code: onScanResult -> parse ServiceData under `APP_SERVICE_UUID` -> fileIdHash/keyId pre-filter -> `BluetoothGatt.connectGatt()` -> `discoverServices()` -> `readCharacteristic(META_CHAR)` -> verify -> `version > local`?
-- **Peripheral:** `BluetoothLeAdvertiser.startAdvertising(settings, AdvertiseData.Builder().addServiceData(APP_SERVICE_UUID, serviceData14B).build(), callback)` - one call per broadcast fileId, each with its own `AdvertiseCallback` for per-file `stopAdvertising`.
-- **Background:** Android `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_CONNECTED_DEVICE` + persistent notification, `SCAN_MODE_LOW_POWER`. Fallback `WorkManager` 15min periodic burst. Foreground-first banner in UI.
+- **HAVE beacon** (`APP_SERVICE_UUID = 00006d38-0000-1000-8000-00805f9b34fb`): one advertising
+  set per broadcast and per relay. Service data = `BleMetaPayload.toBytes()` (fileId 16B + version 4B +
+  fileHash SHA-256 32B + size 4B + keyId 4B + deviceId 16B + nameLen 2B + fileName). **The file name is
+  omitted from the advertisement** (set blank); it is only sent to a *connected* peer via the GATT META
+  characteristic read or the push header, so the name never leaks to passive scanners.
+- **WANT beacon** (`APP_WANT_SERVICE_UUID = 00006d39-0000-1000-8000-00805f9b34fb`): one advertising
+  set per **subscription**. Same META structure, but `fileHash` is zeroed, `version` is the
+  subscriber's *local* version, and the **file name is omitted**, so a peer holding a newer copy can
+  discover the WANT and push without the file name leaking over the air.
+
+Both beacons are controller-offloaded, so they keep broadcasting when the screen is off or the CPU
+is Doze-throttled. This is the basis for **screen-off receiving**: a screen-off *recipient* still
+advertises WANT, while the screen-on *sender* scans, matches the WANT, and pushes over GATT.
+
+- **GATT server:** `APP_SERVICE_UUID` exposes `META_CHAR` (long read) and an **`INCOMING_CHAR`**
+  (`5b9d1c3e-2f8a-4c5b-9a1e-7c3d2e1f0a9b`, `PROPERTY_WRITE`) used by a peer to push a file to a
+  device that only advertised WANT. The push header is 62 bytes (fileId 16 + version 4 + keyId 4 +
+  size 4 + fileHash 32 + nameLen 2) followed by the file name and the encrypted envelope, written in
+  512-byte acknowledged chunks.
+- **Scanner:** `BluetoothLeScanner.startScan(...)` **unfiltered** (some OEM stacks drop service data
+  when filtered via `setServiceUuid`). On `onScanResult`, the service-data UUID selects HAVE vs
+  WANT; the META is parsed and a match (WANT with a newer version we hold, or HAVE newer than our
+  local version) triggers a GATT connection + transfer.
+- **Peripheral:** `BluetoothLeAdvertiser.startAdvertisingSet(...)` — one advertising set per
+  broadcast/relay (HAVE) and one per subscription (WANT), each with its own `AdvertisingSetCallback`
+  for per-file start/stop.
+- **Advertising-set budget:** the controller supports a limited number of concurrent advertising
+  sets (the SDK here does not expose the exact count). `BlePeripheralService` enforces a
+  self-adjusting cap (default 5): WANT ads are dropped when at capacity, the oldest WANT ad is
+  evicted to make room for a higher-priority HAVE/relay ad, and the cap shrinks if the controller
+  rejects a start with `ADVERTISE_FAILED_TOO_MANY_ADVERTISERS`. Deferred WANT ads are retried when a
+  slot frees.
+- **Background:** Android `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_CONNECTED_DEVICE` + persistent
+  notification (or a best-effort regular service + wake lock when the user disables it) keeps BLE
+  alive. A periodic scan/GATT restart (every 5 min) works around Samsung stacks dropping service
+  data.
 
 ## 9. WiFi Direct / P2P
 
@@ -145,8 +182,15 @@ Android-only WiFi Direct (`WifiP2pManager`).
 `SyncEngine` (`@Singleton` via Hilt) started on app launch + foreground service:
 
 1. Load broadcasts (originator+relay) + subscriptions from Room.
-2. Advertise every authoritative file + scan for peers.
-3. On discovery -> fileIdHash matches subscription/broadcast -> GATT meta read -> verify -> if `advertisedVersion > localVersion` (or null) -> WiFi Direct connect -> transfer stream -> verify hash+signature -> commit to store -> notify -> evict old version -> restart ad as relay if not originator.
+2. Advertise every broadcast/relay as a **HAVE** beacon **and** every subscription as a **WANT**
+   beacon, while scanning for peers.
+3. On discovery:
+   - **HAVE** beacon with `version > localVersion` (or local missing): connect via GATT, read META,
+     verify against the subscription's public key, fetch/stream the encrypted envelope, verify hash,
+     commit to store, notify, evict old version.
+   - **WANT** beacon whose `fileId` + `keyId` matches a file we hold at a **newer** version: connect
+     as GATT client and **push** the file to that peer over the `INCOMING_CHAR` (the screen-off
+     receive path).
 4. Dedupe `fileId+version` for 30s, ignore `<= local`.
 
 Relays (`role === RELAY`) share via SyncEngine but **UI only on Subscriptions** screen.
@@ -262,7 +306,12 @@ dependencies {
 ## 16. Risks
 
 - `BluetoothLeAdvertiser` not all devices support peripheral mode -> test on common OEMs early, graceful fallback to GATT server only.
-- 31B adv limit -> hint+GATT verify pattern works but background interop unreliable, foreground-first banner.
+- Extended advertising carries the full META payload (fileId + deviceId + fileName), but the controller
+  limits the number of concurrent advertising sets. The app caps and self-adjusts (see §8); when many
+  broadcasts + subscriptions are active, lower-priority WANT ads may be dropped until a slot frees.
+- Advertising both HAVE and WANT beacons exposes, over the air, that a device *has* or *wants* specific
+  files (with file name and a stable device identifier) — a privacy trade-off enabling screen-off
+  receiving. See PRIVACY.md §4.
 - WiFi Direct varies by OEM (especially Samsung, Xiaomi) -> defensive `WifiP2pManager` error handling, retry logic.
 - OEM Doze/force-quit -> foreground service + `WorkManager` 15min periodic + `WAKE_LOCK`, accept delay.
 
