@@ -35,9 +35,11 @@ class BlePeripheralService(private val context: Context, private val transferMut
         private const val TAG = "BlePeripheral"
     private const val DEVICE_UUID_PREF = "pyramid_device_uuid"
     private val SERVICE_UUID = UUID.fromString(APP_SERVICE_UUID)
+    private val WANT_UUID = UUID.fromString(APP_WANT_SERVICE_UUID)
     private val META_UUID = UUID.fromString(META_CHAR_UUID)
     private val INFO_UUID = UUID.fromString(INFO_CHAR_UUID)
     private val STREAM_UUID = UUID.fromString(STREAM_CHAR_UUID)
+    private val INCOMING_UUID = UUID.fromString(INCOMING_CHAR_UUID)
     private val PPCP_UUID = UUID.fromString("00002a04-0000-1000-8000-00805f9b34fb")
     }
 
@@ -68,6 +70,12 @@ class BlePeripheralService(private val context: Context, private val transferMut
     // the air can carry it (preventing controller-buffer overflow -> status=147/133).
     private val streamCredits = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val subscribedCentrals = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    // Incoming "push" transfers: a peer connects and writes a file to the INCOMING
+    // characteristic (because we advertised "I WANT" but are not scanning, e.g. screen
+    // off). The server assembles the encrypted envelope to a temp file and hands it to
+    // SyncEngine for finalization. Header is 28B: fileId 16B + version 4B + keyId 4B + size 4B.
+    private data class IncomingTransfer(val fileIdBytes: ByteArray, val version: Int, val keyId: ByteArray, val size: Long, val fileHash: ByteArray, val nameLen: Int, val rawFile: java.io.File, val out: java.io.OutputStream, var received: Long)
+    private val incomingTransfers = java.util.concurrent.ConcurrentHashMap<String, IncomingTransfer>()
 
     private val _activeStreamingFileIds = MutableStateFlow<Set<String>>(emptySet())
     val activeStreamingFileIds: StateFlow<Set<String>> = _activeStreamingFileIds.asStateFlow()
@@ -133,6 +141,15 @@ class BlePeripheralService(private val context: Context, private val transferMut
     // Restarting the local GATT server can disrupt the active client connection on some stacks.
     var isDownloadActive: (() -> Boolean)? = null
     var isTransferActive: (() -> Boolean)? = null
+    // Guard for INCOMING pushes: only consulted on the first (header) write. Rejects if
+    // another transfer is already active, but unlike isPeerTransferAllowed it does NOT
+    // check activeUploadPeers (we add the peer there ourselves once the push starts),
+    // so the continued chunk writes of an established push are never self-rejected.
+    var isIncomingTransferAllowed: ((String) -> Boolean)? = null
+    // Incoming "push" transfers: a peer delivers a file to us via the INCOMING characteristic.
+    var onIncomingFile: ((address: String, fileIdBytes: ByteArray, version: Int, keyId: ByteArray, size: Long, fileHash: ByteArray, fileName: String, tempFile: java.io.File) -> Unit)? = null
+    var onIncomingTransferStart: ((String) -> Unit)? = null
+    var onIncomingTransferEnd: ((String) -> Unit)? = null
 
     @SuppressLint("MissingPermission")
     fun startGattServer() {
@@ -147,6 +164,9 @@ class BlePeripheralService(private val context: Context, private val transferMut
         val streamChar = BluetoothGattCharacteristic(STREAM_UUID, BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE or BluetoothGattCharacteristic.PROPERTY_NOTIFY, BluetoothGattCharacteristic.PERMISSION_READ or BluetoothGattCharacteristic.PERMISSION_WRITE)
         streamChar.addDescriptor(BluetoothGattDescriptor(CCC_DESCRIPTOR_UUID, BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE))
         service.addCharacteristic(streamChar)
+        // INCOMING: writable characteristic a peer uses to PUSH a file to us. With response
+        // (WRITE_TYPE_DEFAULT) so the peer gets link-layer backpressure per chunk.
+        service.addCharacteristic(BluetoothGattCharacteristic(INCOMING_UUID, BluetoothGattCharacteristic.PROPERTY_WRITE, BluetoothGattCharacteristic.PERMISSION_WRITE))
         // Peripheral Preferred Connection Parameters: advertises a short connection
         // interval so centrals negotiate a high-throughput link (spec-compliant).
         service.addCharacteristic(BluetoothGattCharacteristic(PPCP_UUID, BluetoothGattCharacteristic.PROPERTY_READ, BluetoothGattCharacteristic.PERMISSION_READ))
@@ -173,6 +193,12 @@ class BlePeripheralService(private val context: Context, private val transferMut
                         }
                         streams.remove(addr); subscribedCentrals.remove(addr); streamCredits.remove(addr)
                         connectedCentrals.remove(addr)
+                        // Clean up any half-received incoming "push" transfer.
+                        incomingTransfers.remove(addr)?.let { tr ->
+                            try { tr.out.close() } catch (_: Exception) {}
+                            try { tr.rawFile.delete() } catch (_: Exception) {}
+                            onIncomingTransferEnd?.invoke(addr)
+                        }
                     }
                 }
             }
@@ -209,6 +235,10 @@ class BlePeripheralService(private val context: Context, private val transferMut
             override fun onCharacteristicWriteRequest(device: BluetoothDevice?, requestId: Int, characteristic: BluetoothGattCharacteristic?, preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray?) {
                 val char = characteristic ?: return
                 val device = device ?: return
+                if (char.uuid == INCOMING_UUID) {
+                    handleIncomingWrite(device, requestId, value, responseNeeded)
+                    return
+                }
                 if (char.uuid == STREAM_UUID) {
                     val cmd = value?.toString(Charsets.UTF_8) ?: ""
                     if (cmd.startsWith("CRED ")) {
@@ -372,6 +402,73 @@ class BlePeripheralService(private val context: Context, private val transferMut
     private fun connectedDevice(address: String): android.bluetooth.BluetoothDevice? =
         bluetoothManager.adapter?.getRemoteDevice(address)
 
+    /**
+     * Handles a peer writing a file to our INCOMING characteristic. The first write
+     * carries a 28-byte header (fileId 16B + version 4B + keyId 4B + size 4B); if it
+     * also carries trailing bytes they are treated as the first chunk. Subsequent
+     * writes append until [IncomingTransfer.received] >= size, at which point the
+     * reassembled file is handed to SyncEngine via [onIncomingFile].
+     */
+    private fun handleIncomingWrite(device: android.bluetooth.BluetoothDevice, requestId: Int, value: ByteArray?, responseNeeded: Boolean) {
+        val addr = device.address
+        if (value == null) { if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null); return }
+        val existing = incomingTransfers[addr]
+        if (existing == null) {
+            if (value.size < 62) {
+                EventLog.log("ble", "Incoming: header too short (${value.size}B) from ${addr.takeLast(5)}")
+                if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null)
+                return
+            }
+            if (isIncomingTransferAllowed?.invoke(addr) == false) {
+                EventLog.log("ble", "Incoming: transfer not allowed from ${addr.takeLast(5)} (busy)")
+                if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null)
+                return
+            }
+            val fileIdBytes = value.copyOfRange(0, 16)
+            val version = ((value[16].toInt() and 0xFF) shl 24) or ((value[17].toInt() and 0xFF) shl 16) or ((value[18].toInt() and 0xFF) shl 8) or (value[19].toInt() and 0xFF)
+            val keyId = value.copyOfRange(20, 24)
+            val size = (((value[24].toLong() and 0xFF) shl 24) or ((value[25].toLong() and 0xFF) shl 16) or ((value[26].toLong() and 0xFF) shl 8) or (value[27].toLong() and 0xFF))
+            val fileHash = value.copyOfRange(28, 60)
+            val nameLen = ((value[60].toInt() and 0xFF) shl 8) or (value[61].toInt() and 0xFF)
+            val hex = fileIdBytes.joinToString("") { "%02x".format(it) }
+            // Buffer everything (name + envelope) to a raw temp file, then split on completion.
+            val rawFile = java.io.File(context.cacheDir, "incoming_raw_${hex.take(12)}_$version.bin")
+            rawFile.parentFile?.mkdirs()
+            val out = rawFile.outputStream()
+            val tr = IncomingTransfer(fileIdBytes, version, keyId, size, fileHash, nameLen, rawFile, out, 0)
+            val extra = if (value.size > 62) value.copyOfRange(62, value.size) else byteArrayOf()
+            if (extra.isNotEmpty()) { out.write(extra); tr.received += extra.size }
+            incomingTransfers[addr] = tr
+            onIncomingTransferStart?.invoke(addr)
+            EventLog.log("ble", "Incoming: header accepted from ${addr.takeLast(5)} file=${hex.take(12)} v$version size=$size nameLen=$nameLen")
+            if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+            return
+        }
+        try { existing.out.write(value) } catch (e: Exception) { EventLog.log("ble", "Incoming: write failed: ${e.message}"); if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null); return }
+        existing.received += value.size
+        val total = existing.nameLen.toLong() + existing.size
+        if (existing.received >= total) {
+            try { existing.out.close() } catch (_: Exception) {}
+            incomingTransfers.remove(addr)
+            val hex = existing.fileIdBytes.joinToString("") { "%02x".format(it) }
+            try {
+                val raw = existing.rawFile.readBytes()
+                val name = if (existing.nameLen > 0) String(raw.copyOfRange(0, existing.nameLen), Charsets.UTF_8) else ""
+                val envelope = raw.copyOfRange(existing.nameLen, (existing.nameLen + existing.size.toInt()).coerceAtMost(raw.size))
+                val envelopeFile = java.io.File(context.cacheDir, "incoming_${hex.take(12)}_${existing.version}.bin")
+                envelopeFile.parentFile?.mkdirs()
+                envelopeFile.writeBytes(envelope)
+                existing.rawFile.delete()
+                EventLog.log("ble", "Incoming: complete from ${addr.takeLast(5)} (file=${hex.take(12)} v${existing.version}, ${existing.received}/$total B, name=\"$name\") -> handing off")
+                onIncomingFile?.invoke(addr, existing.fileIdBytes, existing.version, existing.keyId, existing.size, existing.fileHash, name, envelopeFile)
+            } catch (e: Exception) {
+                EventLog.log("ble", "Incoming: failed to assemble file: ${e.message}")
+            }
+            onIncomingTransferEnd?.invoke(addr)
+        }
+        if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+    }
+
     private fun streamCharacteristic(): BluetoothGattCharacteristic? =
         gattServer?.getService(SERVICE_UUID)?.getCharacteristic(STREAM_UUID)
 
@@ -498,15 +595,27 @@ class BlePeripheralService(private val context: Context, private val transferMut
 
     @SuppressLint("MissingPermission")
     fun startAdvertising(fileId: String, serviceData: ByteArray) {
-        if (advertisingSets.containsKey(fileId)) return
+        startAdvertisingSetInternal(fileId, SERVICE_UUID, serviceData, true)
+    }
+
+    /** Advertises "I WANT <file>" under the WANT UUID so screen-off senders can discover and push. */
+    @SuppressLint("MissingPermission")
+    fun startWantAdvertising(fileId: String, serviceData: ByteArray) {
+        startAdvertisingSetInternal("want:$fileId", WANT_UUID, serviceData, false)
+    }
+
+    private fun startAdvertisingSetInternal(tag: String, serviceUuid: UUID, serviceData: ByteArray, registerHash: Boolean) {
+        if (advertisingSets.containsKey(tag)) return
         val adv = adapter?.bluetoothLeAdvertiser ?: run {
             EventLog.log("ble", "BLE advertiser not available")
             return
         }
         advertiser = adv
-        val sha256 = java.security.MessageDigest.getInstance("SHA-256").digest(fileId.toByteArray(Charsets.UTF_8))
-        val hashHex = sha256.copyOfRange(0, 6).joinToString("") { "%02x".format(it) }
-        fileHashToFileId[hashHex] = fileId
+        if (registerHash) {
+            val sha256 = java.security.MessageDigest.getInstance("SHA-256").digest(tag.toByteArray(Charsets.UTF_8))
+            val hashHex = sha256.copyOfRange(0, 6).joinToString("") { "%02x".format(it) }
+            fileHashToFileId[hashHex] = tag
+        }
         val params = AdvertisingSetParameters.Builder()
             .setInterval(AdvertisingSetParameters.INTERVAL_HIGH)
             .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_HIGH)
@@ -517,26 +626,26 @@ class BlePeripheralService(private val context: Context, private val transferMut
             .build()
         val data = AdvertiseData.Builder()
             .setIncludeDeviceName(false).setIncludeTxPowerLevel(false)
-            .addServiceData(ParcelUuid(SERVICE_UUID), serviceData)
+            .addServiceData(ParcelUuid(serviceUuid), serviceData)
             .build()
         val callback = object : AdvertisingSetCallback() {
             override fun onAdvertisingSetStarted(advertisingSet: AdvertisingSet?, txPower: Int, status: Int) {
                 if (status == AdvertisingSetCallback.ADVERTISE_SUCCESS && advertisingSet != null) {
-                    advertisingSets[fileId] = advertisingSet
-                    EventLog.log("ble", "Extended advertising started: $fileId (txPower=$txPower)")
+                    advertisingSets[tag] = advertisingSet
+                    EventLog.log("ble", "Extended advertising started: $tag (txPower=$txPower)")
                 } else {
-                    EventLog.log("ble", "Extended advertising failed: $fileId (status=$status)")
+                    EventLog.log("ble", "Extended advertising failed: $tag (status=$status)")
                 }
             }
             override fun onAdvertisingSetStopped(advertisingSet: AdvertisingSet?) {
-                advertisingSets.remove(fileId)
-                EventLog.log("ble", "Advertising stopped: $fileId")
+                advertisingSets.remove(tag)
+                EventLog.log("ble", "Advertising stopped: $tag")
             }
         }
-        advertisingCallback[fileId] = callback
+        advertisingCallback[tag] = callback
         try {
             adv.startAdvertisingSet(params, data, null, null, null, callback)
-            EventLog.log("ble", "Starting extended advertising: $fileId (${serviceData.size}B service data)")
+            EventLog.log("ble", "Starting extended advertising: $tag (${serviceData.size}B service data)")
         } catch (e: Exception) {
             EventLog.log("ble", "Failed to start extended advertising: ${e.message}")
         }
@@ -554,6 +663,20 @@ class BlePeripheralService(private val context: Context, private val transferMut
             EventLog.log("ble", "Error stopping advertising for $fileId: ${e.message}")
         }
         EventLog.log("ble", "Stopped advertising: $fileId (remaining=${advertisingSets.size})")
+    }
+
+    @SuppressLint("MissingPermission")
+    fun stopWantAdvertising(fileId: String) {
+        val tag = "want:$fileId"
+        val cb = advertisingCallback.remove(tag)
+        advertisingSets.remove(tag)
+        if (cb == null) return
+        try {
+            advertiser?.stopAdvertisingSet(cb)
+        } catch (e: Exception) {
+            EventLog.log("ble", "Error stopping WANT advertising for $fileId: ${e.message}")
+        }
+        EventLog.log("ble", "Stopped WANT advertising: $fileId (remaining=${advertisingSets.size})")
     }
 
     @SuppressLint("MissingPermission")

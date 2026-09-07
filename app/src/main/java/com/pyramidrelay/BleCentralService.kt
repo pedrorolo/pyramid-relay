@@ -32,8 +32,10 @@ class BleCentralService(private val context: Context) {
     companion object {
         private const val TAG = "BleCentral"
         private val SERVICE_UUID = UUID.fromString(APP_SERVICE_UUID)
+        private val WANT_UUID = UUID.fromString(APP_WANT_SERVICE_UUID)
         private val META_UUID = UUID.fromString(META_CHAR_UUID)
         private val STREAM_UUID = UUID.fromString(STREAM_CHAR_UUID)
+        private val INCOMING_UUID = UUID.fromString(INCOMING_CHAR_UUID)
         const val STREAM_IDLE_TIMEOUT_MS = 20_000L
         const val MAX_FETCH_ATTEMPTS = 3
         private const val MAX_DISCOVERY_RETRIES = 5
@@ -52,7 +54,7 @@ class BleCentralService(private val context: Context) {
     private var lastNoServiceDataLogAt = 0L
     private val activeGattConnections = java.util.concurrent.ConcurrentHashMap<String, BluetoothGatt>()
     private val metaLocks = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
-    var onDeviceDiscovered: ((deviceAddress: String, serviceData: ByteArray, metaPayload: BleMetaPayload?) -> Unit)? = null
+    var onDeviceDiscovered: ((deviceAddress: String, serviceData: ByteArray, metaPayload: BleMetaPayload?, isWant: Boolean) -> Unit)? = null
     var onCongestionDetected: ((deviceAddress: String) -> Unit)? = null
 
     @SuppressLint("MissingPermission")
@@ -91,7 +93,8 @@ class BleCentralService(private val context: Context) {
         scanCallback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 val data = result.scanRecord?.getServiceData(ParcelUuid(SERVICE_UUID))
-                if (data == null) {
+                val wantData = result.scanRecord?.getServiceData(ParcelUuid(WANT_UUID))
+                if (data == null && wantData == null) {
                     // Packets from other apps/phones arrive too; only log occasionally.
                     val now = System.currentTimeMillis()
                     if (now - lastNoServiceDataLogAt > 5_000) {
@@ -100,8 +103,10 @@ class BleCentralService(private val context: Context) {
                     }
                     return
                 }
-                val meta = BleMetaPayload.fromBytes(data)
-                handleScanResult(result.device.address, data, meta)
+                val isWant = data == null
+                val sd = data ?: wantData!!
+                val meta = BleMetaPayload.fromBytes(sd)
+                handleScanResult(result.device.address, sd, meta, isWant)
             }
             override fun onScanFailed(errorCode: Int) {
                 Log.e(TAG, "Scan failed: $errorCode")
@@ -155,8 +160,8 @@ class BleCentralService(private val context: Context) {
         return pendingIntent!!
     }
 
-    fun handleScanResult(deviceAddress: String, data: ByteArray, meta: BleMetaPayload?) {
-        scope.launch { onDeviceDiscovered?.invoke(deviceAddress, data, meta) }
+    fun handleScanResult(deviceAddress: String, data: ByteArray, meta: BleMetaPayload?, isWant: Boolean) {
+        scope.launch { onDeviceDiscovered?.invoke(deviceAddress, data, meta, isWant) }
     }
 
     @SuppressLint("MissingPermission")
@@ -289,6 +294,134 @@ class BleCentralService(private val context: Context) {
 
     fun disconnectAll() {
         activeGattConnections.keys.toList().forEach { disconnectDevice(it) }
+    }
+
+    /**
+     * Pushes a file (the encrypted envelope) to a peer that advertised "I WANT" it
+     * but is not scanning (e.g. screen off). We connect as the GATT client and
+     * write the envelope to the peer's INCOMING characteristic: a 62-byte header
+     * (fileId 16B + version 4B + keyId 4B + size 4B + fileHash 32B + nameLen 2B)
+     * followed by the file name (nameLen bytes) and then the payload, all in
+     * acknowledged 512-byte chunks (WRITE_TYPE_DEFAULT gives link-layer backpressure
+     * via onCharacteristicWrite). The peer assembles, learns the file name, and
+     * finalizes.
+     */
+    @SuppressLint("MissingPermission")
+    suspend fun pushFile(
+        deviceAddress: String,
+        fileIdBytes: ByteArray,
+        version: Int,
+        keyId: ByteArray,
+        size: Long,
+        fileHash: ByteArray,
+        fileName: String,
+        encrypted: ByteArray,
+        progress: (Long, Long) -> Unit
+    ): Boolean {
+        if (encrypted.size.toLong() != size) {
+            EventLog.log("ble", "pushFile: payload size ${encrypted.size} != declared $size")
+            return false
+        }
+        val device = bluetoothManager.adapter?.getRemoteDevice(deviceAddress) ?: run {
+            EventLog.log("ble", "pushFile: device unavailable ${deviceAddress.takeLast(5)}")
+            return false
+        }
+        val nameBytes = fileName.toByteArray(Charsets.UTF_8)
+        val nameLen = nameBytes.size.coerceAtMost(0xFFFF)
+        // The wire payload is [nameBytes][encrypted]; the receiver splits on nameLen.
+        val combined = nameBytes.copyOf(nameLen) + encrypted
+        val totalBytes = combined.size.toLong()
+        val header = ByteArray(62).apply {
+            fileIdBytes.copyInto(this, 0, 0, 16)
+            this[16] = (version shr 24).toByte(); this[17] = (version shr 16).toByte(); this[18] = (version shr 8).toByte(); this[19] = version.toByte()
+            keyId.copyInto(this, 20, 0, 4)
+            val s = size.coerceAtMost(0xFFFFFFFFL)
+            this[24] = (s shr 24).toByte(); this[25] = (s shr 16).toByte(); this[26] = (s shr 8).toByte(); this[27] = s.toByte()
+            fileHash.copyInto(this, 28, 0, 32)
+            this[60] = (nameLen shr 8).toByte(); this[61] = nameLen.toByte()
+        }
+        val deferred = CompletableDeferred<Boolean>()
+        var gattRef: BluetoothGatt? = null
+        var incomingChar: BluetoothGattCharacteristic? = null
+        var acked = 0L
+        var lastSent = 0L
+        var headerSent = false
+        fun sendFrom(gatt: BluetoothGatt, from: Long) {
+            if (from >= totalBytes) { if (!deferred.isCompleted) deferred.complete(true); return }
+            val end = minOf(from + 512L, totalBytes)
+            val chunk = combined.copyOfRange(from.toInt(), end.toInt())
+            lastSent = end - from
+            val r = gatt.writeCharacteristic(incomingChar!!, chunk, android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+            if (r != android.bluetooth.BluetoothGatt.GATT_SUCCESS)
+                EventLog.log("ble", "pushFile: write submit returned $r (non-fatal, awaiting ack)")
+        }
+        val gattCallback = object : BluetoothGattCallback() {
+            override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+                if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
+                    scope.launch { delay(800); try { if (!gatt.requestMtu(517)) gatt.discoverServices() } catch (_: Exception) {} }
+                } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
+                    if (!deferred.isCompleted) {
+                        EventLog.log("ble", "pushFile: disconnected status=$status from ${deviceAddress.takeLast(5)} ($acked/$totalBytes B sent)")
+                        deferred.complete(acked >= totalBytes)
+                    }
+                    gattRef?.let { try { it.disconnect(); it.close() } catch (_: Exception) {} }
+                }
+            }
+            override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) { negotiateConnectionParams(gatt); gatt.discoverServices() }
+            override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                if (status != android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
+                    EventLog.log("ble", "pushFile: service discovery failed ($status)")
+                    if (!deferred.isCompleted) deferred.complete(false)
+                    return
+                }
+                incomingChar = gatt.getService(SERVICE_UUID)?.getCharacteristic(INCOMING_UUID)
+                if (incomingChar == null) {
+                    EventLog.log("ble", "pushFile: INCOMING characteristic not found on ${deviceAddress.takeLast(5)}")
+                    if (!deferred.isCompleted) deferred.complete(false)
+                    return
+                }
+                val r = gatt.writeCharacteristic(incomingChar!!, header, android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+                if (r != android.bluetooth.BluetoothGatt.GATT_SUCCESS)
+                    EventLog.log("ble", "pushFile: header write submit $r (non-fatal)")
+            }
+            override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+                if (characteristic.uuid != INCOMING_UUID) return
+                if (status != android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
+                    EventLog.log("ble", "pushFile: write rejected ($status) to ${deviceAddress.takeLast(5)}")
+                    if (!deferred.isCompleted) deferred.complete(false)
+                    gatt.disconnect(); gatt.close(); return
+                }
+                if (!headerSent) {
+                    headerSent = true
+                    EventLog.log("ble", "pushFile: header accepted, streaming $totalBytes B to ${deviceAddress.takeLast(5)}")
+                    sendFrom(gatt, 0L)
+                    return
+                }
+                acked = minOf(acked + lastSent, totalBytes)
+                progress(acked, totalBytes)
+                if (acked >= totalBytes) {
+                    EventLog.log("ble", "pushFile: all $totalBytes B acknowledged to ${deviceAddress.takeLast(5)}")
+                    if (!deferred.isCompleted) deferred.complete(true)
+                } else {
+                    sendFrom(gatt, acked)
+                }
+            }
+        }
+        device.connectGatt(context, false, gattCallback, android.bluetooth.BluetoothDevice.TRANSPORT_LE)
+            .also { gattRef = it; if (it != null) activeGattConnections[deviceAddress] = it }
+            ?: run { EventLog.log("ble", "pushFile: connectGatt returned null for ${deviceAddress.takeLast(5)}"); return false }
+        EventLog.log("ble", "GATT pushFile v$version ($totalBytes B) to ${deviceAddress.takeLast(5)}")
+        val timeoutMs = 60_000L + totalBytes.coerceAtLeast(0L) * 1000L / 5_000L
+        return try {
+            try { withTimeout(timeoutMs) { deferred.await() } } catch (e: Exception) {
+                EventLog.log("ble", "pushFile TIMED OUT after ${timeoutMs / 1000}s ($acked/$totalBytes B) to ${deviceAddress.takeLast(5)}")
+                false
+            }
+        } finally {
+            gattRef?.let { try { it.disconnect(); it.close() } catch (_: Exception) {} }
+            gattRef = null
+            activeGattConnections.remove(deviceAddress)
+        }
     }
 
     /**

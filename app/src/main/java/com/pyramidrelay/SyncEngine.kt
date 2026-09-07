@@ -55,6 +55,7 @@ class SyncEngine(
     // do not probe that device again for PROBE_COOLDOWN_MS.
     private val lastProbeAt = ConcurrentHashMap<String, Long>()
     private val advertisedFiles = ConcurrentHashMap.newKeySet<String>()
+    private val advertisedWants = ConcurrentHashMap.newKeySet<String>()
     private val peerLocks = ConcurrentHashMap<String, Mutex>()
     private val activeDownloadPeers = ConcurrentHashMap.newKeySet<String>()
     private val activeUploadPeers = ConcurrentHashMap.newKeySet<String>()
@@ -82,6 +83,9 @@ class SyncEngine(
 
     private val _downloadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
     val downloadProgress: StateFlow<Map<String, Float>> = _downloadProgress.asStateFlow()
+
+    private val _uploadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
+    val uploadProgress: StateFlow<Map<String, Float>> = _uploadProgress.asStateFlow()
 
     val activeStreamingFileIds: StateFlow<Set<String>> get() = blePeripheralService.activeStreamingFileIds
     val streamingProgress: StateFlow<Map<String, Float>> get() = blePeripheralService.streamingProgress
@@ -172,8 +176,8 @@ class SyncEngine(
                 }
                 }
             }
-            bleCentralService.onDeviceDiscovered = { address, serviceData, metaPayload ->
-                scope.launch { handleDiscoveredDevice(address, serviceData, metaPayload) }
+            bleCentralService.onDeviceDiscovered = { address, serviceData, metaPayload, isWant ->
+                scope.launch { handleDiscoveredDevice(address, serviceData, metaPayload, isWant) }
             }
             bleCentralService.onCongestionDetected = { address ->
                 val deviceId = deviceToDeviceId[address] ?: address
@@ -213,12 +217,31 @@ class SyncEngine(
             }
             blePeripheralService.isDownloadActive = { _downloadingFileIds.value.isNotEmpty() || activeDownloadPeers.isNotEmpty() }
             blePeripheralService.isTransferActive = { transferMutex.isLocked }
+            blePeripheralService.isIncomingTransferAllowed = { address ->
+                !transferMutex.isLocked && !activeDownloadPeers.contains(address)
+            }
             blePeripheralService.onTransferStart = { stopAdvertisingAndScanning() }
             blePeripheralService.onTransferEnd = {
                 EventLog.log("sync", "onTransferEnd fired, resuming advertising/scanning")
                 resumeAdvertisingAndScanning()
             }
             blePeripheralService.onStreamArmed = { stopAdvertisingAndScanning() }
+            // Incoming "push": a peer delivers a file to us because we advertised
+            // "I WANT" but are not scanning (e.g. screen off). Lock the shared
+            // transfer mutex so only one transfer (push or pull) happens at a time.
+            blePeripheralService.onIncomingTransferStart = { address ->
+                try { runBlocking { transferMutex.lock() } } catch (_: Exception) {}
+                activeUploadPeers.add(address)
+                stopAdvertisingAndScanning()
+            }
+            blePeripheralService.onIncomingFile = { address, fileIdBytes, version, keyId, size, fileHash, fileName, tempFile ->
+                handleIncomingFile(address, fileIdBytes, version, keyId, size, fileHash, fileName, tempFile)
+            }
+            blePeripheralService.onIncomingTransferEnd = { address ->
+                activeUploadPeers.remove(address)
+                transferMutex.unlock()
+                resumeAdvertisingAndScanning()
+            }
 
             // Retry GATT server if initial attempt fails (permissions may not be ready yet after fresh install)
             for (attempt in 1..5) {
@@ -238,6 +261,13 @@ class SyncEngine(
                 }
                 EventLog.log("adv", "Loaded ${broadcasts.size} existing broadcasts")
             } catch (e: Exception) { Log.e(TAG, "Initial broadcast load failed", e) }
+            // Also advertise "I WANT" for existing subscriptions so screen-off senders can push.
+            try {
+                val subs = subscriptionDao.getAll()
+                for (s in subs) {
+                    try { startWantAdvertising(s) } catch (e: Exception) { Log.e(TAG, "startWantAdvertising failed", e) }
+                }
+            } catch (e: Exception) { Log.e(TAG, "Initial subscription WANT load failed", e) }
             // Watch for future changes
             launch {
                 while (true) {
@@ -259,6 +289,28 @@ class SyncEngine(
                             }
                         }
                     }
+                }
+            }
+            // Watch for subscription changes: advertise "I WANT" for each subscription so
+            // screen-off senders can discover and push. Stop stale WANT ads on deletion.
+            launch {
+                while (true) {
+                    try { subscriptionDao.changeFlow.collect {
+                        val subs = subscriptionDao.getAll()
+                        val currentIds = subs.map { it.fileId }.toSet()
+                        for (id in advertisedWants.toList()) {
+                            if (id !in currentIds) {
+                                try { blePeripheralService.stopWantAdvertising(id) } catch (_: Exception) {}
+                                advertisedWants.remove(id)
+                                EventLog.log("adv", "Stopped WANT ad for removed subscription $id")
+                            }
+                        }
+                        for (s in subs) {
+                            if (s.fileId !in advertisedWants) {
+                                try { startWantAdvertising(s) } catch (e: Exception) { Log.e(TAG, "startWantAdvertising failed", e); EventLog.log("ble", "startWantAdvertising failed: ${e.message}") }
+                            }
+                        }
+                    } } catch (e: Exception) { Log.e(TAG, "subscription WANT watcher failed", e) }
                 }
             }
             // Retry scan if initial attempt fails (permissions may not be ready yet after fresh install)
@@ -345,6 +397,13 @@ class SyncEngine(
                         EventLog.log("ble", "resumeAdvertising failed: ${e.message}")
                     }
                 }
+                // Re-advertise "I WANT" for subscriptions (stopAdvertisingAndScanning stops everything).
+                val subs = runBlocking { subscriptionDao.getAll() }
+                for (s in subs) {
+                    if (s.fileId in advertisedWants) {
+                        try { startWantAdvertising(s) } catch (e: Exception) { EventLog.log("ble", "resume WANT advertising failed: ${e.message}") }
+                    }
+                }
                 EventLog.log("sync", "Resumed advertising and scanning after transfer")
             } catch (e: Exception) {
                 EventLog.log("sync", "resumeAdvertisingAndScanning failed: ${e.message}")
@@ -417,11 +476,39 @@ class SyncEngine(
     }
 
     /**
+     * Advertises "I WANT <file>" for a subscription under the WANT service UUID. The
+     * advertised payload mirrors a META payload but its version field is this device's
+     * local version (0 if none), so a peer that has a *newer* version can discover the
+     * ad and push. Advertising survives screen-off (controller offloaded), which is the
+     * whole point: a screen-off recipient can still be found and pushed to.
+     */
+    suspend fun startWantAdvertising(subscription: SubscriptionEntity) {
+        val fileIdBytes = uuidToBytes(subscription.fileId) ?: return
+        val keyId = cryptoService.keyId(subscription.publicKey)
+        val metaPayload = BleMetaPayload(
+            fileIdBytes,
+            subscription.localVersion ?: 0,
+            ByteArray(32),
+            0,
+            subscription.fileName ?: "",
+            keyId,
+            blePeripheralService.getDeviceUuidBytes()
+        )
+        val serviceData = metaPayload.toBytes()
+        blePeripheralService.startWantAdvertising(subscription.fileId, serviceData)
+        advertisedWants.add(subscription.fileId)
+        EventLog.log("adv", "Advertising WANT \"${subscription.fileName ?: subscription.fileId.take(8)}\" (have v${subscription.localVersion ?: 0})")
+    }
+
+    /**
      * Handles one BLE discovery event.
      * Returns true iff the advertisement was recognized and the receive pipeline
      * completed successfully (meta verified AND transfer accepted).
      */
-    internal suspend fun handleDiscoveredDevice(deviceAddress: String, serviceData: ByteArray, advMeta: BleMetaPayload?): Boolean {
+    internal suspend fun handleDiscoveredDevice(deviceAddress: String, serviceData: ByteArray, advMeta: BleMetaPayload?, isWant: Boolean = false): Boolean {
+        if (isWant) {
+            return handleWantAdvertisement(deviceAddress, serviceData, advMeta)
+        }
         if (serviceData.size < 14) { EventLog.log("scan", "Advertisement too short (${serviceData.size}B) - dropped"); return false }
         // Random jitter to stagger competing devices discovering the same peer
         kotlinx.coroutines.delay((Math.random() * 5_000).toLong())
@@ -513,6 +600,148 @@ class SyncEngine(
         val knownKeys = subscriptions.joinToString(",") { cryptoService.keyId(it.publicKey).joinToString("") { b -> "%02x".format(b) }.take(8) }
         EventLog.log("scan", "Adv hash=${fileIdHash.joinToString("") { b -> "%02x".format(b) }.take(12)} keyId=${keyId.joinToString("") { b -> "%02x".format(b) }.take(8)} | mine: ids=[$knownIds] keys=[$knownKeys] - NO MATCH")
         return false
+    }
+
+    /**
+     * Handles a "I WANT <file>" advertisement: a peer is advertising that it wants the
+     * given file. If WE have a newer version (matching keyId) we push it to them. This
+     * is the screen-off receive path — the sender (which is scanning) discovers the
+     * recipient's controller-offloaded WANT advertisement and initiates the transfer.
+     */
+    internal suspend fun handleWantAdvertisement(deviceAddress: String, serviceData: ByteArray, advMeta: BleMetaPayload?): Boolean {
+        if (serviceData.size < 14) { EventLog.log("scan", "WANT advertisement too short (${serviceData.size}B) - dropped"); return false }
+        kotlinx.coroutines.delay((Math.random() * 5_000).toLong())
+        val fileIdHash = advMeta?.let { cryptoService.fileIdHash(uuidToString(it.fileId)) } ?: serviceData.copyOfRange(0, 6)
+        val wantVersion = advMeta?.version ?: ((serviceData[6].toInt() and 0xFF) shl 24) or ((serviceData[7].toInt() and 0xFF) shl 16) or ((serviceData[8].toInt() and 0xFF) shl 8) or (serviceData[9].toInt() and 0xFF)
+        val keyId = advMeta?.keyId ?: serviceData.copyOfRange(10, 14)
+        advMeta?.deviceId?.joinToString("") { "%02x".format(it) }?.let { deviceToDeviceId[deviceAddress] = it }
+        val hashHex = fileIdHash.joinToString("") { "%02x".format(it) }
+        val dedupKey = "want:$hashHex:$wantVersion"
+        val now = System.currentTimeMillis()
+        dedupCache[dedupKey]?.let { if (now - it < DEDUP_TTL_MS) { return false } }
+        dedupCache[dedupKey] = now
+
+        val broadcasts = broadcastDao.getAll()
+        val broadcast = broadcasts.firstOrNull { b -> cryptoService.fileIdHash(b.fileId).contentEquals(fileIdHash) }
+        if (broadcast == null) { EventLog.log("scan", "WANT adv hash=$hashHex - we do not have this file, ignored"); return false }
+        if (!cryptoService.keyId(broadcast.publicKey).contentEquals(keyId)) {
+            EventLog.log("scan", "WANT adv hash=$hashHex - key mismatch, ignored")
+            return false
+        }
+        if (broadcast.version <= wantVersion) {
+            EventLog.log("scan", "WANT adv hash=$hashHex - our v${broadcast.version} not newer than their v$wantVersion, ignored")
+            return false
+        }
+        EventLog.log("scan", "WANT match: we have \"${broadcast.fileName}\" v${broadcast.version}, peer wants <= v$wantVersion -> pushing")
+        return pushToPeer(deviceAddress, broadcast, wantVersion, advMeta)
+    }
+
+    /** Pushes a file we have to a peer that advertised "I WANT" it. */
+    private suspend fun pushToPeer(deviceAddress: String, broadcast: BroadcastEntity, wantVersion: Int, advMeta: BleMetaPayload?): Boolean {
+        var deviceId = advMeta?.deviceId?.joinToString("") { "%02x".format(it) } ?: deviceToDeviceId[deviceAddress] ?: deviceAddress
+        deviceToDeviceId[deviceAddress] = deviceId
+        if (CongestionPauses.isCongested(deviceId)) { EventLog.log("sync", "Skipping push to ${deviceAddress.takeLast(5)} - congestion pause active"); return false }
+        while (transferMutex.isLocked || activeDownloadPeers.contains(deviceAddress) || activeUploadPeers.contains(deviceAddress)) { kotlinx.coroutines.delay(100) }
+        var result = false
+        transferMutex.withLock {
+            peerLock(deviceAddress).withLock {
+                stopAdvertisingAndScanning()
+                blePeripheralService.stopGattServer()
+                kotlinx.coroutines.delay(2_000L)
+                EventLog.log("sync", "Push starting for \"${broadcast.fileName}\" v${broadcast.version} to ${deviceAddress.takeLast(5)} (peer wants <= v$wantVersion)")
+                try {
+                    activeUploadPeers.add(deviceAddress)
+                    val encryptedFile = java.io.File(fileService.getVersionDir(broadcast.fileId, broadcast.version), "file.encrypted")
+                    if (!encryptedFile.exists()) {
+                        val privateKey = broadcast.privateKeyAlias?.let { cryptoService.getPrivateKey(it) }
+                        if (privateKey != null) {
+                            val compressedFile = fileService.getCompressedFile(broadcast.fileId, broadcast.version)
+                            encryptedFile.parentFile?.mkdirs()
+                            cryptoService.encryptCompressedFile(compressedFile, encryptedFile, privateKey)
+                        }
+                    }
+                    if (!encryptedFile.exists()) { EventLog.log("sync", "No encrypted envelope to push for ${broadcast.fileId.takeLast(8)}"); return@withLock }
+                    val encrypted = encryptedFile.readBytes()
+                    val fileIdBytes = uuidToBytes(broadcast.fileId) ?: return@withLock
+                    val keyId = cryptoService.keyId(broadcast.publicKey)
+                    val hashBytes = Base64.getDecoder().decode(broadcast.fileHash)
+                    EventLog.log("ble", "Pushing ${broadcast.fileId} v${broadcast.version} (${encrypted.size}B) to ${deviceAddress.takeLast(5)}")
+                    _uploadProgress.value = _uploadProgress.value + (broadcast.fileId to 0f)
+                    val pushed = bleCentralService.pushFile(deviceAddress, fileIdBytes, broadcast.version, keyId, encrypted.size.toLong(), hashBytes, broadcast.fileName, encrypted) { got, total ->
+                        val p = (got.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                        _uploadProgress.value = _uploadProgress.value + (broadcast.fileId to p)
+                    }
+                    result = pushed
+                    _uploadProgress.value = _uploadProgress.value - broadcast.fileId
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error pushing ${broadcast.fileId}", e); EventLog.log("sync", "Error pushing ${broadcast.fileId}: ${e.message}")
+                } finally {
+                    activeUploadPeers.remove(deviceAddress)
+                }
+            }
+        }
+        resumeAdvertisingAndScanning()
+        EventLog.log("sync", "Push of \"${broadcast.fileName}\" v${broadcast.version} to ${deviceAddress.takeLast(5)} ${if (result) "COMPLETE" else "FAILED"}")
+        return result
+    }
+
+    /**
+     * Finalizes a file pushed to us by a peer (we advertised "I WANT"). Runs synchronously
+     * on the GATT server thread so the transfer mutex is held until we finish; mirrors the
+     * tail of fetchAndUpdateSubscription: persist the envelope, decrypt, verify hash, store,
+     * mark the subscription received, and re-advertise the copy as a relay.
+     */
+    private fun handleIncomingFile(address: String, fileIdBytes: ByteArray, version: Int, keyId: ByteArray, size: Long, fileHash: ByteArray, fileName: String, tempFile: java.io.File): Boolean {
+        val fileId = uuidToString(fileIdBytes)
+        val hashHex = fileHash.joinToString("") { "%02x".format(it) }
+        try {
+            val subscriptions = runBlocking { subscriptionDao.getAll() }
+            val subscription = subscriptions.firstOrNull { s ->
+                cryptoService.fileIdHash(s.fileId).contentEquals(cryptoService.fileIdHash(fileId)) && cryptoService.keyId(s.publicKey).contentEquals(keyId)
+            }
+            if (subscription == null) {
+                EventLog.log("sync", "Incoming: no matching subscription for ${fileId.takeLast(8)} (keyId ${keyId.joinToString("") { "%02x".format(it) }.take(8)}) - discarding")
+                tempFile.delete(); return false
+            }
+            if (subscription.localVersion != null && version <= subscription.localVersion) {
+                EventLog.log("sync", "Incoming: already have v${subscription.localVersion} >= v$version for ${fileId.takeLast(8)} - discarding")
+                tempFile.delete(); return false
+            }
+            if (!tempFile.isFile || tempFile.length() != size) {
+                EventLog.log("sync", "Incoming: size mismatch (${tempFile.length()}/$size) - discarding")
+                tempFile.delete(); return false
+            }
+            val resolvedName = fileName.takeIf { it.isNotBlank() } ?: subscription.fileName ?: "File"
+            val encrypted = tempFile.readBytes()
+            val persistedEnvelope = java.io.File(fileService.getVersionDir(fileId, version), "file.encrypted")
+            persistedEnvelope.parentFile?.mkdirs()
+            persistedEnvelope.writeBytes(encrypted)
+            val compressed = try { cryptoService.decryptCompressed(encrypted, cryptoService.publicKeyFromBase64(subscription.publicKey)) } catch (e: Exception) { tempFile.delete(); EventLog.log("sync", "Incoming decrypt failed: ${e.message}"); return false }
+            val internalFile = fileService.getFile(fileId, version)
+            try { fileService.decompressFile(tempFile.also { it.writeBytes(compressed) }, internalFile); tempFile.delete() } catch (e: Exception) { internalFile.delete(); tempFile.delete(); EventLog.log("sync", "Incoming decompress failed: ${e.message}"); return false }
+            val receivedHash = cryptoService.sha256Hex(internalFile.readBytes())
+            if (receivedHash != hashHex) { internalFile.delete(); EventLog.log("sync", "Incoming hash mismatch - discarded"); return false }
+            runBlocking {
+                subscriptionDao.updateReceived(fileId, version, internalFile.absolutePath, version, System.currentTimeMillis(), resolvedName)
+                fileService.evictOldVersions(fileId, version)
+                if (subscription.lastNotifiedVersion == null || subscription.lastNotifiedVersion < version) {
+                    notificationService.showUpdateNotification(resolvedName, fileId, subscription.localVersion ?: 0, version)
+                    subscriptionDao.updateLastNotified(fileId, version)
+                }
+                val relayFileIdBytes = uuidToBytes(fileId) ?: return@runBlocking
+                val relayKeyId = cryptoService.keyId(subscription.publicKey)
+                val relayMeta = BleMetaPayload(relayFileIdBytes, version, fileHash, size, resolvedName, relayKeyId, blePeripheralService.getDeviceUuidBytes())
+                broadcastDao.upsert(BroadcastEntity(fileId, resolvedName, subscription.relayName ?: fileId.take(8), "application/octet-stream", internalFile.absolutePath, Base64.getEncoder().encodeToString(fileHash), internalFile.length(), size, version, subscription.publicKey, null, "", Role.RELAY, subscription.subscribedAt, System.currentTimeMillis()))
+                blePeripheralService.startAdvertising(fileId, relayMeta.toBytes())
+                onFileReceived?.invoke(fileId, version)
+                EventLog.log("sync", "Incoming push for \"$resolvedName\" v$version received and stored")
+            }
+            return true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error handling incoming file $fileId", e); EventLog.log("sync", "Error handling incoming file $fileId: ${e.message}")
+            try { tempFile.delete() } catch (_: Exception) {}
+            return false
+        }
     }
 
     /** Relay keeping its own copy current: verify meta, pull bytes, re-sign, update DB. */
