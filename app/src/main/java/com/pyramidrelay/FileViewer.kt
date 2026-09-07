@@ -8,15 +8,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import io.noties.markwon.Markwon
 
 abstract class FileViewer {
     abstract val extensions: Set<String>
@@ -35,7 +32,6 @@ class MarkdownViewer : FileViewer() {
 
     @Composable
     override fun Render(filePath: String) {
-        val context = LocalContext.current
         val markdown = remember(filePath) {
             try {
                 java.io.File(filePath).readText()
@@ -43,21 +39,12 @@ class MarkdownViewer : FileViewer() {
                 "*Error reading file: ${e.message}*"
             }
         }
-        val markwon = remember(context) { Markwon.create(context) }
-        val scrollState = rememberScrollState()
-        AndroidView(
-            factory = { ctx ->
-                TextView(ctx).apply {
-                    setTextColor(android.graphics.Color.parseColor("#FFFFFFFF"))
-                    setLineSpacing(0f, 1.2f)
-                    textSize = 14f
-                }
-            },
-            update = { textView -> markwon.setMarkdown(textView, markdown) },
+        MarkdownText(
+            text = markdown,
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 400.dp)
-                .verticalScroll(scrollState)
+                .heightIn(max = 400.dp),
+            scrollable = true
         )
     }
 }

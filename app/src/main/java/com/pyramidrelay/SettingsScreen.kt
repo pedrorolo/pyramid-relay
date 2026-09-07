@@ -23,38 +23,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import android.graphics.Color as AndroidColor
-import android.text.method.LinkMovementMethod
-import android.widget.TextView
-import androidx.compose.ui.graphics.toArgb
-import io.noties.markwon.Markwon
-import io.noties.markwon.ext.tables.TablePlugin
-
-@Composable
-private fun MarkdownText(text: String, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    val colorScheme = MaterialTheme.colorScheme
-    val markwon = remember {
-        Markwon.builder(context)
-            .usePlugin(TablePlugin.create(context))
-            .build()
-    }
-    AndroidView(
-        modifier = modifier,
-        factory = { ctx ->
-            TextView(ctx).apply {
-                movementMethod = LinkMovementMethod.getInstance()
-                setBackgroundColor(AndroidColor.TRANSPARENT)
-            }
-        },
-        update = { tv ->
-            tv.setTextColor(colorScheme.onSurface.toArgb())
-            tv.setLinkTextColor(colorScheme.primary.toArgb())
-            markwon.setMarkdown(tv, text)
-        }
-    )
-}
 
 @Composable
 fun SettingsScreen(modifier: Modifier = Modifier) {
