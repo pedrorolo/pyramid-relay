@@ -1,0 +1,29 @@
+Pyramid Relay
+Copyright (c) 2026 Pedro Miguel dos Santos Morte Martins Rolo. All rights reserved.
+
+1. OWNERSHIP
+   The software, documentation, and all associated files (the "Software")
+   are protected by copyright law and are the exclusive property of the
+   copyright holder. All rights not expressly granted are reserved.
+
+2. LICENSE, NOT SALE
+   The Software is licensed, not sold. No license or right to use the
+   Software is granted except as may be expressly provided in a separate
+   written end-user license agreement (EULA) executed with the copyright
+   holder.
+
+3. RESTRICTIONS
+   Without the prior written permission of the copyright holder, you may
+   not, and you must not permit others to: reproduce, copy, modify,
+   translate, create derivative works of, decompile, reverse engineer,
+   disassemble, distribute, sublicense, rent, lease, lend, sell, or
+   otherwise make the Software (or any part of it) available in any form
+   or by any means.
+
+4. THIRD-PARTY COMPONENTS
+   This product bundles third-party open-source components. Those
+   components remain governed by their own licenses and are NOT subject to
+   the proprietary terms above. Their license texts and required notices
+   are set out in NOTICE.md, which must be retained and provided with the
+   Software. The copyright holder's proprietary rights extend only to the
+   original code of this project.

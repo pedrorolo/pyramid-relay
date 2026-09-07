@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 64" width="280" height="64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a1a"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </linearGradient>
+  </defs>
+  <!-- background -->
+  <rect width="280" height="64" rx="12" fill="url(#bg)"/>
+  <!-- pyramid icon -->
+  <g transform="translate(14, 12) scale(0.1)">
+    <path d="M256,176 L168,344 L344,344 Z" fill="none" stroke="#ffffff" stroke-width="10" stroke-linejoin="round"/>
+  </g>
+  <!-- text -->
+  <text x="62" y="28" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="700" fill="#ffffff" letter-spacing="0.5">Pyramid</text>
+  <text x="62" y="48" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="700" fill="#888888" letter-spacing="0.5">Relay</text>
+</svg>
