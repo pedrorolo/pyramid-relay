@@ -43,7 +43,10 @@ agree to these terms, do not install or use the Software.
    error logs). This data is not linked to the contents of any files you
    transfer. You may opt out of diagnostics collection where such an option is
    provided in the Software's settings. The Licensor will handle any collected
-   data in accordance with applicable data-protection law.
+    data in accordance with applicable data-protection law. Our full Privacy
+    Policy is published at
+    https://raw.githubusercontent.com/pedrorolo/pyramid-relay/main/PRIVACY.md
+    and explains in detail what data is and is not collected.
 
 5. UPDATES
    The Licensor may, at its discretion, make updates, modifications, or new

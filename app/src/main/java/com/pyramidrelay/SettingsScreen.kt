@@ -1,5 +1,7 @@
 package com.pyramidrelay
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -115,7 +118,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         ) {
             Text(
                 text = "README",
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                textDecoration = TextDecoration.Underline
             )
         }
         Row(
@@ -127,7 +132,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         ) {
             Text(
                 text = "Privacy Policy",
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                textDecoration = TextDecoration.Underline
             )
         }
         Row(
@@ -139,7 +146,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         ) {
             Text(
                 text = "End User License Agreement",
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                textDecoration = TextDecoration.Underline
             )
         }
         Row(
@@ -151,7 +160,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         ) {
             Text(
                 text = "License",
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                textDecoration = TextDecoration.Underline
             )
         }
         Row(
@@ -163,7 +174,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         ) {
             Text(
                 text = "Open Source Licenses",
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                textDecoration = TextDecoration.Underline
             )
         }
     }
