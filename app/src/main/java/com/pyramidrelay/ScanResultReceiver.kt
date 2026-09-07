@@ -43,14 +43,17 @@ class ScanResultReceiver : BroadcastReceiver() {
             return
         }
         val data = result.scanRecord?.getServiceData(ParcelUuid(java.util.UUID.fromString(APP_SERVICE_UUID)))
-        if (data == null) return
-        val meta = BleMetaPayload.fromBytes(data)
+        val wantData = result.scanRecord?.getServiceData(ParcelUuid(java.util.UUID.fromString(APP_WANT_SERVICE_UUID)))
+        if (data == null && wantData == null) return
+        val isWant = data == null
+        val sd = data ?: (wantData ?: return)
+        val meta = BleMetaPayload.fromBytes(sd)
         // If we were restarted from a killed state (no foreground service running),
         // start the service as a regular (non-foreground) service so its wake lock
         // keeps the process alive for any resulting transfer.
         if (app.bleForegroundService == null) {
             try { context.startService(Intent(context, BleForegroundService::class.java)) } catch (_: Exception) {}
         }
-        central.handleScanResult(result.device.address, data, meta)
+        central.handleScanResult(result.device.address, sd, meta, isWant)
     }
 }

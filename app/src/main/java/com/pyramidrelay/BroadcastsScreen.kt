@@ -93,6 +93,31 @@ class BroadcastsViewModel(
         syncEngine?.updateFullRotationInterval()
     }
 
+    private fun readUriBytes(context: android.content.Context, uri: Uri, mimeType: String?): ByteArray? {
+        try {
+            context.contentResolver.openInputStream(uri)?.use { return it.readBytes() }
+        } catch (e: java.io.FileNotFoundException) {
+            // Cloud providers (e.g. Google Drive) expose "virtual" documents that cannot be
+            // opened directly. Request an exported representation via openTypedAssetFileDescriptor.
+            EventLog.log("adv", "readUriBytes: openInputStream failed (${e.message}); trying typed export")
+        } catch (e: Exception) {
+            EventLog.log("adv", "readUriBytes: openInputStream failed (${e.message})")
+            return null
+        }
+        val types = listOfNotNull(
+            mimeType?.takeIf { it.isNotBlank() && it != "application/octet-stream" },
+            "application/octet-stream",
+            "*/*"
+        )
+        for (t in types) {
+            try {
+                val afd = context.contentResolver.openTypedAssetFileDescriptor(uri, t, null) ?: continue
+                afd.use { return it.createInputStream().readBytes() }
+            } catch (_: Exception) { }
+        }
+        return null
+    }
+
     fun importAndBroadcast(uri: Uri, context: android.content.Context, relayName: String?) {
         viewModelScope.launch {
             val fileId = UUID.randomUUID().toString()
@@ -102,9 +127,11 @@ class BroadcastsViewModel(
             cryptoService.storeKeyPair(alias, keyPair)
             val fileName = fileService.getFileName(uri)
             val mimeType = fileService.getMimeType(uri)
-            val inputStream = context.contentResolver.openInputStream(uri) ?: return@launch
-            val fileBytes = inputStream.readBytes()
-            inputStream.close()
+            val fileBytes = readUriBytes(context, uri, mimeType) ?: run {
+                EventLog.log("adv", "importAndBroadcast: CANCELLED - cannot read file (cloud/virtual?)")
+                _error.value = "Could not read this file. If it's stored in the cloud, download it first."
+                return@launch
+            }
             val version = 1
             val vDir = fileService.getVersionDir(fileId, version); vDir.mkdirs()
             val file = fileService.getFile(fileId, version); file.writeBytes(fileBytes)
@@ -140,12 +167,12 @@ class BroadcastsViewModel(
 
     fun updateBroadcast(broadcast: BroadcastEntity, uri: Uri, context: android.content.Context) {
         viewModelScope.launch {
-            val inputStream = context.contentResolver.openInputStream(uri) ?: run {
-                EventLog.log("adv", "updateBroadcast: CANCELLED - cannot open input stream")
+            val mimeType = fileService.getMimeType(uri)
+            val fileBytes = readUriBytes(context, uri, mimeType) ?: run {
+                EventLog.log("adv", "updateBroadcast: CANCELLED - cannot read file (cloud/virtual?)")
+                _error.value = "Could not read this file. If it's stored in the cloud, download it first."
                 return@launch
             }
-            val fileBytes = inputStream.readBytes()
-            inputStream.close()
             val newFileName = fileService.getFileName(uri)
             createNewVersion(broadcast, fileBytes, newFileName)
         }

@@ -9,9 +9,18 @@ package com.pyramidrelay
 // 6d388575-46d6-4e84-9384-b14fb2006b20. Keeping the service UUID in the
 // Bluetooth base form leaves room for the 14-byte discovery payload.
 const val APP_SERVICE_UUID = "00006d38-0000-1000-8000-00805f9b34fb"
+// Separate service UUID used only for "I WANT <file>" advertisements. Subscribers
+// advertise under this UUID so screen-off senders (which keep scanning while the
+// recipient's advertising is controller-offloaded) can discover them and push.
+const val APP_WANT_SERVICE_UUID = "00006d39-0000-1000-8000-00805f9b34fb"
 const val META_CHAR_UUID = "826c59a6-7b83-4270-a039-2550fa5b5aef"
 const val INFO_CHAR_UUID = "3a18840a-9dd4-4ae1-8f13-daa6d8240183"
 const val STREAM_CHAR_UUID = "4939a5ce-2837-4a3f-91b2-e83ede29d06f"
+// Writable characteristic on every device's GATT server. A peer that wants to
+// deliver a file to us (because we advertised "I WANT" but are screen-off and
+// cannot initiate a pull) connects and writes the file here. The server assembles
+// the encrypted envelope and hands it off for finalization.
+const val INCOMING_CHAR_UUID = "5b9d1c3e-2f8a-4c5b-9a1e-7c3d2e1f0a9b"
 const val BLE_SCAN_RESULT_ACTION = "com.pyramidrelay.intent.action.BLE_SCAN_RESULT"
 const val BLE_SCAN_RESULT_PERMISSION = "com.pyramidrelay.permission.BLE_SCAN_RESULT"
 const val TRANSFER_PORT = 8988
