@@ -1,7 +1,5 @@
 # Pyramid Relay
 
-<img src="https://raw.githubusercontent.com/pedrorolo/pyramid-relay/refs/heads/main/docs/ic_launcher.svg" alt="Pyramid Relay" width="128"/>
-
 ![Vibe Coded](https://img.shields.io/badge/%F0%9F%8E%B5_Vibe_Coded-purple?style=for-the-badge)
 
 > ⚠️ **Warning — BLE Stack Instability:** This app uses Android's BLE GATT stack extensively for file transfers. On some devices (particularly Samsung), prolonged or repeated BLE operations can render the OS Bluetooth stack into an inconsistent state. Symptoms include GATT operations timing out, connections being silently dropped, or the device failing to advertise/scan. When this happens, **a device reboot is required** to restore Bluetooth functionality. This is a known Android BLE stack limitation, not a bug in the app.
