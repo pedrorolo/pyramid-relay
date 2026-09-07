@@ -40,7 +40,7 @@ The following components are licensed under the Apache License, Version 2.0:
   - Google Tink (com.google.crypto.tink:tink-android)
   - Google ML Kit Barcode Scanning (com.google.mlkit:barcode-scanning)
   - ZXing-android-embedded (com.journeyapps:zxing-android-embedded)
-  - Markwon (io.noties.markwon:core)
+  - Markwon (io.noties.markwon:core, io.noties.markwon:ext-tables)
   - MockK (io.mockk:mockk)
 
 Copyright notices for these components (as applicable):
