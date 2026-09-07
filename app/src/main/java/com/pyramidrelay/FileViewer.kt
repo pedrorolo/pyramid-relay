@@ -1,5 +1,6 @@
 package com.pyramidrelay
 
+import android.graphics.Color as AndroidColor
 import android.text.Html
 import android.text.util.Linkify
 import android.widget.TextView
@@ -8,9 +9,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -55,6 +58,7 @@ class TextViewer : FileViewer() {
     @Composable
     override fun Render(filePath: String) {
         val context = LocalContext.current
+        val colorScheme = MaterialTheme.colorScheme
         val text = remember(filePath) {
             try {
                 java.io.File(filePath).readText()
@@ -66,7 +70,7 @@ class TextViewer : FileViewer() {
         AndroidView(
             factory = { ctx ->
                 TextView(ctx).apply {
-                    setTextColor(android.graphics.Color.parseColor("#FFFFFFFF"))
+                    setBackgroundColor(AndroidColor.TRANSPARENT)
                     setLineSpacing(0f, 1.2f)
                     textSize = 14f
                     setTextIsSelectable(true)
@@ -74,6 +78,8 @@ class TextViewer : FileViewer() {
                 }
             },
             update = { textView ->
+                textView.setTextColor(colorScheme.onSurface.toArgb())
+                textView.setLinkTextColor(colorScheme.primary.toArgb())
                 textView.text = text
                 Linkify.addLinks(textView, Linkify.WEB_URLS)
                 Linkify.addLinks(textView, Pattern.compile("pyramidrelay://[^\\s]+"), "pyramidrelay")
@@ -91,6 +97,7 @@ class HtmlViewer : FileViewer() {
 
     @Composable
     override fun Render(filePath: String) {
+        val colorScheme = MaterialTheme.colorScheme
         val html = remember(filePath) {
             try {
                 java.io.File(filePath).readText()
@@ -102,12 +109,15 @@ class HtmlViewer : FileViewer() {
         AndroidView(
             factory = { ctx ->
                 TextView(ctx).apply {
-                    setTextColor(android.graphics.Color.parseColor("#FFFFFFFF"))
+                    setBackgroundColor(AndroidColor.TRANSPARENT)
                     setLineSpacing(0f, 1.2f)
                     textSize = 14f
+                    movementMethod = android.text.method.LinkMovementMethod.getInstance()
                 }
             },
             update = { textView ->
+                textView.setTextColor(colorScheme.onSurface.toArgb())
+                textView.setLinkTextColor(colorScheme.primary.toArgb())
                 textView.text = Html.fromHtml(html, Html.FROM_HTML_MODE_COMPACT)
             },
             modifier = Modifier
