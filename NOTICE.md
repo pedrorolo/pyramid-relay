@@ -13,7 +13,7 @@ NOTE ON UPSTREAM NOTICE FILES
 -----------------------------
 Apache License 2.0 section 4(d) requires reproducing the contents of any
 "NOTICE" file shipped by an upstream component. A full inspection of the
-application's runtime dependency closure (the releaseRuntimeClasspath, 326
+application's runtime dependency closure (the releaseRuntimeClasspath, 328
 resolved modules) found that NONE of the bundled components ship a NOTICE
 file inside their distributed artifacts. The only NOTICE files present in the
 build environment belong to build-time tooling (Android Gradle Plugin, lint,
