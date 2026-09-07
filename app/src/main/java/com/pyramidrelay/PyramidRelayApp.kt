@@ -19,6 +19,7 @@ class PyramidRelayApp : Application() {
         private set
     lateinit var blePeripheralService: BlePeripheralService
         private set
+    var bleForegroundService: BleForegroundService? = null
     lateinit var syncEngine: SyncEngine
         private set
     lateinit var settingsStore: SettingsStore

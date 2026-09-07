@@ -17,7 +17,13 @@ class BootReceiver : BroadcastReceiver() {
         EventLog.log("app", "Device booted — starting Pyramid Relay service and UI")
         try {
             val serviceIntent = Intent(context, BleForegroundService::class.java)
-            ContextCompat.startForegroundService(context, serviceIntent)
+            if (SettingsStore(context).showPersistentNotification) {
+                ContextCompat.startForegroundService(context, serviceIntent)
+            } else {
+                // Setting off: attempt to run as a regular service (no notification),
+                // accepting that the system may kill it in the background.
+                context.startService(serviceIntent)
+            }
             val mainIntent = Intent(context, MainActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }

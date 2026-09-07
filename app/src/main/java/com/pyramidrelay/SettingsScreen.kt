@@ -87,6 +87,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 onCheckedChange = { newValue ->
                     showPersistentNotification = newValue
                     app.settingsStore.showPersistentNotification = newValue
+                    app.bleForegroundService?.applyPersistentNotification(newValue)
                 }
             )
             Text(

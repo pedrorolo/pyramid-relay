@@ -147,12 +147,18 @@ class MainActivity : ComponentActivity() {
 
     private fun startSyncService() {
         val settingsStore = SettingsStore(this)
-        if (!settingsStore.showPersistentNotification) return
+        val intent = Intent(this, BleForegroundService::class.java)
         try {
-            ContextCompat.startForegroundService(this, Intent(this, BleForegroundService::class.java))
+            if (settingsStore.showPersistentNotification) {
+                ContextCompat.startForegroundService(this, intent)
+            } else {
+                // Setting off: start as a regular service so it still attempts to run
+                // in the background, but without a persistent notification.
+                startService(intent)
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start BLE foreground service", e)
-            EventLog.log("app", "Failed to start BLE foreground service: ${e.message}")
+            Log.e(TAG, "Failed to start BLE service", e)
+            EventLog.log("app", "Failed to start BLE service: ${e.message}")
         }
     }
 
