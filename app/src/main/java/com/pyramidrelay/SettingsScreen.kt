@@ -33,6 +33,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     var showEula by remember { mutableStateOf(false) }
     var showPrivacy by remember { mutableStateOf(false) }
     var showLicense by remember { mutableStateOf(false) }
+    var showReadme by remember { mutableStateOf(false) }
     val licensesText = remember {
         try {
             context.assets.open("licenses.txt").bufferedReader().use { it.readText() }
@@ -59,6 +60,13 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             context.assets.open("license.txt").bufferedReader().use { it.readText() }
         } catch (e: Exception) {
             "Unable to load the license."
+        }
+    }
+    val readmeText = remember {
+        try {
+            context.assets.open("readme.txt").bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            "Unable to load the README."
         }
     }
 
@@ -146,6 +154,18 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.bodyMedium
             )
         }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showReadme = true }
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "README",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
     }
 
     if (showLicenses) {
@@ -216,6 +236,24 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             },
             confirmButton = {
                 TextButton(onClick = { showLicense = false }) { Text("Close") }
+            }
+        )
+    }
+
+    if (showReadme) {
+        AlertDialog(
+            onDismissRequest = { showReadme = false },
+            title = { Text("README") },
+            text = {
+                Box(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        text = readmeText,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showReadme = false }) { Text("Close") }
             }
         )
     }

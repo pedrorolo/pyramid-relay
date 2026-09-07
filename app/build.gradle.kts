@@ -93,12 +93,14 @@ val syncLegalAssets by tasks.registering(Copy::class) {
         include("EULA.md")
         include("LICENSE")
         include("PRIVACY.md")
+        include("README.md")
     }
     into("src/main/assets")
     rename("NOTICE.md", "licenses.txt")
     rename("EULA.md", "eula.txt")
     rename("LICENSE", "license.txt")
     rename("PRIVACY.md", "privacy_policy.txt")
+    rename("README.md", "readme.txt")
 }
 
 tasks.named("preBuild") { dependsOn(syncLegalAssets) }
