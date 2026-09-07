@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.FloatingActionButton
@@ -344,8 +345,9 @@ fun BroadcastsScreen(
                                              putExtra(Intent.EXTRA_TEXT, link)
                                          }
                                          context.startActivity(Intent.createChooser(shareIntent, "Share link"))
-                                     }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Share, contentDescription = "Share Link", modifier = Modifier.size(20.dp)) }
-                                     IconButton(onClick = { showUpdateConfirm = broadcast }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Refresh, contentDescription = "Update", modifier = Modifier.size(20.dp)) }
+                                      }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Share, contentDescription = "Share Link", modifier = Modifier.size(20.dp)) }
+                                      IconButton(onClick = { saveLauncher.launch(broadcast.fileName) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.FileDownload, contentDescription = "Save", modifier = Modifier.size(20.dp)) }
+                                      IconButton(onClick = { showUpdateConfirm = broadcast }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Refresh, contentDescription = "Update", modifier = Modifier.size(20.dp)) }
                                      IconButton(onClick = { showDeleteConfirm = broadcast }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Delete, contentDescription = "Delete", modifier = Modifier.size(20.dp)) }
                                      if (hasViewer) {
                                          val source = app.fileService.getFile(broadcast.fileId, broadcast.version)
