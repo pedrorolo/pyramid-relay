@@ -1,8 +1,12 @@
 package com.pyramidrelay
 
+import android.content.Intent
 import android.graphics.Color as AndroidColor
-import android.text.Html
+import android.net.Uri
 import android.text.util.Linkify
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.TextView
 import java.util.regex.Pattern
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -97,6 +101,7 @@ class HtmlViewer : FileViewer() {
 
     @Composable
     override fun Render(filePath: String) {
+        val context = LocalContext.current
         val colorScheme = MaterialTheme.colorScheme
         val html = remember(filePath) {
             try {
@@ -105,25 +110,38 @@ class HtmlViewer : FileViewer() {
                 "<p>Error reading file: ${e.message}</p>"
             }
         }
-        val scrollState = rememberScrollState()
         AndroidView(
             factory = { ctx ->
-                TextView(ctx).apply {
-                    setBackgroundColor(AndroidColor.TRANSPARENT)
-                    setLineSpacing(0f, 1.2f)
-                    textSize = 14f
-                    movementMethod = android.text.method.LinkMovementMethod.getInstance()
+                WebView(ctx).apply {
+                    setBackgroundColor(colorScheme.surface.toArgb())
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.allowFileAccess = true
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView,
+                            request: WebResourceRequest
+                        ): Boolean {
+                            val url = request.url.toString()
+                            if (url.startsWith("pyramidrelay://")) {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                )
+                                return true
+                            }
+                            return false
+                        }
+                    }
                 }
             },
-            update = { textView ->
-                textView.setTextColor(colorScheme.onSurface.toArgb())
-                textView.setLinkTextColor(colorScheme.primary.toArgb())
-                textView.text = Html.fromHtml(html, Html.FROM_HTML_MODE_COMPACT)
+            update = { webView ->
+                webView.setBackgroundColor(colorScheme.surface.toArgb())
+                webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
             },
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(max = 400.dp)
-                .verticalScroll(scrollState)
         )
     }
 }
