@@ -24,14 +24,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import android.graphics.Color as AndroidColor
 import android.text.method.LinkMovementMethod
 import android.widget.TextView
+import androidx.compose.ui.graphics.toArgb
 import io.noties.markwon.Markwon
 import io.noties.markwon.ext.tables.TablePlugin
 
 @Composable
 private fun MarkdownText(text: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val colorScheme = MaterialTheme.colorScheme
     val markwon = remember {
         Markwon.builder(context)
             .usePlugin(TablePlugin.create(context))
@@ -42,9 +45,14 @@ private fun MarkdownText(text: String, modifier: Modifier = Modifier) {
         factory = { ctx ->
             TextView(ctx).apply {
                 movementMethod = LinkMovementMethod.getInstance()
+                setBackgroundColor(AndroidColor.TRANSPARENT)
             }
         },
-        update = { tv -> markwon.setMarkdown(tv, text) }
+        update = { tv ->
+            tv.setTextColor(colorScheme.onSurface.toArgb())
+            tv.setLinkTextColor(colorScheme.primary.toArgb())
+            markwon.setMarkdown(tv, text)
+        }
     )
 }
 
@@ -133,6 +141,18 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .clickable { showReadme = true }
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "README",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
                 .clickable { showPrivacy = true }
                 .padding(vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -175,18 +195,6 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         ) {
             Text(
                 text = "Open Source Licenses",
-                style = MaterialTheme.typography.bodyMedium
-            )
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { showReadme = true }
-                .padding(vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "README",
                 style = MaterialTheme.typography.bodyMedium
             )
         }
