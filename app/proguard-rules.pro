@@ -36,3 +36,15 @@
 -keep class dagger.** { *; }
 -keep class * extends dagger.internal.Factory { *; }
 -dontwarn dagger.**
+
+# Markwon (Markdown rendering) — uses reflection for plugins/spans
+-keep class io.noties.markwon.** { *; }
+-dontwarn io.noties.markwon.**
+
+# Bouncy Castle (crypto provider used by Tink) — provider/reflection based
+-keep class org.bouncycastle.** { *; }
+-dontwarn org.bouncycastle.**
+
+# Google Tink (hybrid encryption) — self-registers primitives via reflection
+-keep class com.google.crypto.tink.** { *; }
+-dontwarn com.google.crypto.tink.**

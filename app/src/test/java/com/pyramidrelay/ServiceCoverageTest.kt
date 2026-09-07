@@ -88,7 +88,7 @@ class ServiceCoverageTest {
         syncEngineField.isAccessible = true
         syncEngineField.set(service, mockEngine)
 
-        val app = mockk<P2PBroadcasterApp>(relaxed = true)
+        val app = mockk<PyramidRelayApp>(relaxed = true)
         every { app.syncEngine } returns mockEngine
 
         val applicationField = android.app.Service::class.java.getDeclaredField("mApplication")

@@ -2,7 +2,7 @@ package com.pyramidrelay
 
 import android.app.Application
 
-class P2PBroadcasterApp : Application() {
+class PyramidRelayApp : Application() {
     lateinit var database: AppDatabase
         private set
     lateinit var broadcastDao: BroadcastDao
@@ -41,5 +41,6 @@ class P2PBroadcasterApp : Application() {
         )
         settingsStore = SettingsStore(this)
         syncEngine.start()
+        PyramidRelayIntegrityHelper.requestToken(this)
     }
 }

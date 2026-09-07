@@ -38,7 +38,7 @@ class BleForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        val app = application as P2PBroadcasterApp
+        val app = application as PyramidRelayApp
         syncEngine = app.syncEngine
         persistentNotification = app.settingsStore.showPersistentNotification
         rePostNotification()

@@ -164,7 +164,7 @@ fun SubscriptionsScreen(
     initialFileName: String? = null
 ) {
     val context = LocalContext.current
-    val app = context.applicationContext as P2PBroadcasterApp
+    val app = context.applicationContext as PyramidRelayApp
     val viewModel = remember {
         SubscriptionsViewModel(
             app.subscriptionDao,
@@ -279,7 +279,7 @@ fun SubscriptionRow(
     onDelete: () -> Unit
 ) {
     val context = LocalContext.current
-    val app = context.applicationContext as P2PBroadcasterApp
+    val app = context.applicationContext as PyramidRelayApp
     val bluetoothAvailable by app.syncEngine.isBluetoothAvailable.collectAsState()
     var showQr by remember { mutableStateOf(false) }
     var markdownFile by remember { mutableStateOf<Pair<String, String>?>(null) }

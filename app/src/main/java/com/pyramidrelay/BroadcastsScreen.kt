@@ -191,7 +191,7 @@ fun BroadcastsScreen(
     onShareQr: (fileId: String, pk: String, relayName: String?, fileName: String?, version: Int) -> Unit = { _, _, _, _, _ -> }
 ) {
     val context = LocalContext.current
-    val app = context.applicationContext as P2PBroadcasterApp
+    val app = context.applicationContext as PyramidRelayApp
     val viewModel = remember { BroadcastsViewModel(app.broadcastDao, app.cryptoService, app.fileService, app.syncEngine) }
     val broadcasts by viewModel.broadcasts.collectAsState()
     val activeStreamingFileIds by viewModel.relayingFileIds.collectAsState()

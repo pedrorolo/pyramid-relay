@@ -27,7 +27,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun SettingsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val app = context.applicationContext as P2PBroadcasterApp
+    val app = context.applicationContext as PyramidRelayApp
     var showPersistentNotification by remember { mutableStateOf(app.settingsStore.showPersistentNotification) }
     var showLicenses by remember { mutableStateOf(false) }
     var showEula by remember { mutableStateOf(false) }

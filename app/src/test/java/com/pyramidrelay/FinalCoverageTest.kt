@@ -41,7 +41,7 @@ class FinalCoverageTest {
     }
 
     @Test
-    fun `P2PBroadcasterApp instantiation via Robolectric`() {
+    fun `PyramidRelayApp instantiation via Robolectric`() {
         val app = ApplicationProvider.getApplicationContext<Application>()
         assertNotNull(app)
     }

@@ -180,7 +180,7 @@ class AdvancedServiceTest {
     }
 
     @Test
-    fun `P2PBroadcasterApp instantiation`() {
+    fun `PyramidRelayApp instantiation`() {
         val context = ApplicationProvider.getApplicationContext<Application>()
         assertNotNull(context)
     }
