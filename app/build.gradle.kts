@@ -85,6 +85,24 @@ tasks.register<JacocoReport>("jacocoTestReport") {
     reports { xml.required.set(true); html.required.set(true) }
 }
 
+// Single source of truth: the in-app legal/notice texts are generated from
+// their canonical repo-root files so they can never drift from the originals.
+val syncLegalAssets by tasks.registering(Copy::class) {
+    from(rootDir) {
+        include("NOTICE.md")
+        include("EULA.md")
+        include("LICENSE")
+        include("PRIVACY.md")
+    }
+    into("src/main/assets")
+    rename("NOTICE.md", "licenses.txt")
+    rename("EULA.md", "eula.txt")
+    rename("LICENSE", "license.txt")
+    rename("PRIVACY.md", "privacy_policy.txt")
+}
+
+tasks.named("preBuild") { dependsOn(syncLegalAssets) }
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

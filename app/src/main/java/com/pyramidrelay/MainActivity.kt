@@ -21,7 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.filled.BroadcastOnHome
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -254,8 +254,7 @@ fun MainScreen(intentState: State<Intent?>? = null) {
                             popUpTo("log")
                         }
                     },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
-                    label = { Text("Settings", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center) }
+                    icon = { Icon(Icons.Default.Menu, contentDescription = "Settings") }
                 )
             }
         }

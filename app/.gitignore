@@ -1,1 +1,6 @@
 /build
+# Generated from the repo-root legal/notice files by the syncLegalAssets build task
+/src/main/assets/licenses.txt
+/src/main/assets/eula.txt
+/src/main/assets/license.txt
+/src/main/assets/privacy_policy.txt

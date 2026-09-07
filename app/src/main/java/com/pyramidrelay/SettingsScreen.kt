@@ -31,6 +31,8 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     var showPersistentNotification by remember { mutableStateOf(app.settingsStore.showPersistentNotification) }
     var showLicenses by remember { mutableStateOf(false) }
     var showEula by remember { mutableStateOf(false) }
+    var showPrivacy by remember { mutableStateOf(false) }
+    var showLicense by remember { mutableStateOf(false) }
     val licensesText = remember {
         try {
             context.assets.open("licenses.txt").bufferedReader().use { it.readText() }
@@ -43,6 +45,20 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             context.assets.open("eula.txt").bufferedReader().use { it.readText() }
         } catch (e: Exception) {
             "Unable to load the end user license agreement."
+        }
+    }
+    val privacyText = remember {
+        try {
+            context.assets.open("privacy_policy.txt").bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            "Unable to load the privacy policy."
+        }
+    }
+    val licenseText = remember {
+        try {
+            context.assets.open("license.txt").bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            "Unable to load the license."
         }
     }
 
@@ -77,15 +93,20 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 )
             }
         }
+        Text(
+            text = "Documentation",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(top = 16.dp)
+        )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { showLicenses = true }
+                .clickable { showPrivacy = true }
                 .padding(vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Open Source Licenses",
+                text = "Privacy Policy",
                 style = MaterialTheme.typography.bodyMedium
             )
         }
@@ -98,6 +119,30 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         ) {
             Text(
                 text = "End User License Agreement",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showLicense = true }
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "License",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showLicenses = true }
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Open Source Licenses",
                 style = MaterialTheme.typography.bodyMedium
             )
         }
@@ -135,6 +180,42 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             },
             confirmButton = {
                 TextButton(onClick = { showEula = false }) { Text("Close") }
+            }
+        )
+    }
+
+    if (showPrivacy) {
+        AlertDialog(
+            onDismissRequest = { showPrivacy = false },
+            title = { Text("Privacy Policy") },
+            text = {
+                Box(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        text = privacyText,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPrivacy = false }) { Text("Close") }
+            }
+        )
+    }
+
+    if (showLicense) {
+        AlertDialog(
+            onDismissRequest = { showLicense = false },
+            title = { Text("License") },
+            text = {
+                Box(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        text = licenseText,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLicense = false }) { Text("Close") }
             }
         )
     }
