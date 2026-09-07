@@ -1,6 +1,7 @@
 package com.pyramidrelay
 
 import android.annotation.SuppressLint
+import android.app.PendingIntent
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
@@ -11,6 +12,8 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.content.Intent
+import android.os.Build
 import android.os.ParcelUuid
 import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
@@ -44,6 +47,8 @@ class BleCentralService(private val context: Context) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var scanJob: Job? = null
     private var scanCallback: ScanCallback? = null
+    private var pendingIntent: PendingIntent? = null
+    private var usingPendingIntent: Boolean = false
     private var lastNoServiceDataLogAt = 0L
     private val activeGattConnections = java.util.concurrent.ConcurrentHashMap<String, BluetoothGatt>()
     private val metaLocks = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
@@ -52,7 +57,22 @@ class BleCentralService(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun startScan() {
-        if (scanJob?.isActive == true) return
+        stopScan()
+        // When the persistent notification is enabled the app runs as a foreground
+        // service and the process stays alive, so a live ScanCallback is fine.
+        // When it is disabled the service runs as a regular (non-foreground)
+        // service that the system may kill; a PendingIntent scan lets the OS hold
+        // the scan and wake the app on a match, so scanning survives screen-off
+        // and process death without a foreground notification.
+        if (SettingsStore(context).showPersistentNotification) {
+            startLiveScan()
+        } else {
+            startPendingIntentScan()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startLiveScan() {
         val s = scanner ?: run {
             Log.e(TAG, "BLE scanner not available")
             EventLog.log("ble", "BLE scanner not available (Bluetooth off or missing)")
@@ -81,7 +101,7 @@ class BleCentralService(private val context: Context) {
                     return
                 }
                 val meta = BleMetaPayload.fromBytes(data)
-                scope.launch { onDeviceDiscovered?.invoke(result.device.address, data, meta) }
+                handleScanResult(result.device.address, data, meta)
             }
             override fun onScanFailed(errorCode: Int) {
                 Log.e(TAG, "Scan failed: $errorCode")
@@ -96,14 +116,65 @@ class BleCentralService(private val context: Context) {
             scanCallback = null
             return
         }
-        scanJob = scope.launch { Log.d(TAG, "BLE scan started") }
-        EventLog.log("ble", "BLE scan started")
+        scanJob = scope.launch { Log.d(TAG, "BLE live scan started") }
+        EventLog.log("ble", "BLE live scan started")
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startPendingIntentScan() {
+        val s = scanner ?: run {
+            Log.e(TAG, "BLE scanner not available")
+            EventLog.log("ble", "BLE scanner not available (Bluetooth off or missing)")
+            return
+        }
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setReportDelay(0)
+            .setLegacy(false)
+            .setPhy(android.bluetooth.BluetoothDevice.PHY_LE_1M)
+            .build()
+        try {
+            s.startScan(emptyList(), settings, getScanPendingIntent())
+            usingPendingIntent = true
+            EventLog.log("ble", "BLE PendingIntent scan started (background, no foreground service)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start PendingIntent scan", e)
+            EventLog.log("ble", "Failed to start PendingIntent scan: ${e.message} (check BLUETOOTH_SCAN permission)")
+        }
+    }
+
+    private fun getScanPendingIntent(): PendingIntent {
+        pendingIntent?.let { return it }
+        val intent = Intent(BLE_SCAN_RESULT_ACTION).setPackage(context.packageName)
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        pendingIntent = PendingIntent.getBroadcast(context, 0, intent, flags)
+        return pendingIntent!!
+    }
+
+    fun handleScanResult(deviceAddress: String, data: ByteArray, meta: BleMetaPayload?) {
+        scope.launch { onDeviceDiscovered?.invoke(deviceAddress, data, meta) }
     }
 
     @SuppressLint("MissingPermission")
     fun stopScan() {
-        try { scanCallback?.let { scanner?.stopScan(it) } } catch (e: Exception) { EventLog.log("ble", "Error stopping scan: ${e.message}") }
-        scanCallback = null; scanJob?.cancel(); scanJob = null
+        try {
+            if (usingPendingIntent) {
+                pendingIntent?.let { scanner?.stopScan(it) }
+            } else {
+                scanCallback?.let { scanner?.stopScan(it) }
+            }
+        } catch (e: Exception) {
+            EventLog.log("ble", "Error stopping scan: ${e.message}")
+        }
+        scanCallback = null
+        pendingIntent = null
+        usingPendingIntent = false
+        scanJob?.cancel()
+        scanJob = null
         EventLog.log("ble", "BLE scan stopped")
     }
 

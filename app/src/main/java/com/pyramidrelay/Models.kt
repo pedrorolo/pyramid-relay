@@ -12,6 +12,8 @@ const val APP_SERVICE_UUID = "00006d38-0000-1000-8000-00805f9b34fb"
 const val META_CHAR_UUID = "826c59a6-7b83-4270-a039-2550fa5b5aef"
 const val INFO_CHAR_UUID = "3a18840a-9dd4-4ae1-8f13-daa6d8240183"
 const val STREAM_CHAR_UUID = "4939a5ce-2837-4a3f-91b2-e83ede29d06f"
+const val BLE_SCAN_RESULT_ACTION = "com.pyramidrelay.intent.action.BLE_SCAN_RESULT"
+const val BLE_SCAN_RESULT_PERMISSION = "com.pyramidrelay.permission.BLE_SCAN_RESULT"
 const val TRANSFER_PORT = 8988
 // GATT-only transfer (option C): conservative Android-to-Android BLE throughput
 // is ~50 KB/s; a 100 MB file therefore takes at most ~33 minutes to transfer.

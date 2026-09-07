@@ -22,6 +22,10 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <permission
+        android:name="com.pyramidrelay.permission.BLE_SCAN_RESULT"
+        android:protectionLevel="signature" />
+
     <application
         android:name=".PyramidRelayApp"
         android:allowBackup="true"
@@ -61,6 +65,15 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".ScanResultReceiver"
+            android:exported="false"
+            android:permission="com.pyramidrelay.permission.BLE_SCAN_RESULT">
+            <intent-filter>
+                <action android:name="com.pyramidrelay.intent.action.BLE_SCAN_RESULT" />
             </intent-filter>
         </receiver>
     </application>
