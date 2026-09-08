@@ -110,7 +110,7 @@ class SyncEngineTest {
         val broadcast = BroadcastEntity(
             fileId, "test.txt", null, "text/plain", "/path", "abc",
             1024, 1024, 5, pubKeyStr, null, "sig",
-            Role.RELAY, 0L, 0L
+            Role.ORIGINATOR, 0L, 0L
         )
 
         engine.startAdvertising(broadcast)
@@ -120,7 +120,9 @@ class SyncEngineTest {
                 data.size > 14 &&
                 BleMetaPayload.fromBytes(data) != null &&
                 BleMetaPayload.fromBytes(data)!!.version == 5 &&
-                BleMetaPayload.fromBytes(data)!!.fileName == "test.txt"
+                // File names are never broadcast (privacy): receivers learn
+                // the name after connecting, via META or the push header.
+                BleMetaPayload.fromBytes(data)!!.fileName == ""
             })
         }
     }
@@ -133,7 +135,7 @@ class SyncEngineTest {
         val hash = Base64.getEncoder().encodeToString(cryptoService.sha256("test".toByteArray()))
         val broadcast = BroadcastEntity(
             fileId, "f", null, "t", "p", hash, 100, 100, 0x01020304, pubKeyStr, null, "s",
-            Role.RELAY, 0, 0
+            Role.ORIGINATOR, 0, 0
         )
 
         engine.startAdvertising(broadcast)
@@ -186,7 +188,7 @@ class SyncEngineTest {
         val broadcast = BroadcastEntity(
             fileId, "test.txt", null, "text/plain", "/path", "abc",
             1024, 1024, 3, pubKeyStr, null, "sig",
-            Role.RELAY, 0L, 0L
+            Role.ORIGINATOR, 0L, 0L
         )
         coEvery { broadcastDao.getAll() } returns listOf(broadcast)
         coEvery { subscriptionDao.getById(any()) } returns null
@@ -337,7 +339,7 @@ class SyncEngineTest {
         verify {
             blePeripheralService.startAdvertising(fileId, match { data ->
                 val meta = BleMetaPayload.fromBytes(data)
-                meta != null && meta.version == 0 && meta.fileName == "test.txt"
+                meta != null && meta.version == 0 && meta.fileName == ""
             })
         }
     }
@@ -415,7 +417,7 @@ class SyncEngineTest {
         val hash = Base64.getEncoder().encodeToString(cryptoService.sha256("test".toByteArray()))
         val broadcast = BroadcastEntity(
             fileId, "test", null, "t", "/p", hash, 100, 100, 7, pubKeyStr, null, "s",
-            Role.RELAY, 0, 0
+            Role.ORIGINATOR, 0, 0
         )
 
         engine.startAdvertising(broadcast)
@@ -436,7 +438,7 @@ class SyncEngineTest {
         val hash = Base64.getEncoder().encodeToString(cryptoService.sha256("test".toByteArray()))
         val broadcast = BroadcastEntity(
             fileId, "test", null, "t", "/p", hash, 100, 100, 3, pubKeyStr, null, "s",
-            Role.RELAY, 0, 0
+            Role.ORIGINATOR, 0, 0
         )
 
         engine.startAdvertising(broadcast)
@@ -444,9 +446,27 @@ class SyncEngineTest {
         verify {
             blePeripheralService.startAdvertising(fileId, match { data ->
                 val meta = BleMetaPayload.fromBytes(data)
-                meta != null && meta.version == 3 && meta.fileName == "test"
+                meta != null && meta.version == 3 && meta.fileName == ""
             })
         }
+    }
+
+    @Test
+    fun `startAdvertising skips relay without encrypted envelope`() = runTest {
+        val fileId = UUID.randomUUID().toString()
+        val kp = cryptoService.generateRsaKeyPair()
+        val pubKeyStr = cryptoService.publicKeyToBase64(kp.public)
+        val hash = Base64.getEncoder().encodeToString(cryptoService.sha256("test".toByteArray()))
+        val broadcast = BroadcastEntity(
+            fileId, "test", null, "t", "/p", hash, 100, 100, 3, pubKeyStr, null, "s",
+            Role.RELAY, 0, 0
+        )
+
+        // No file.encrypted under the mocked version dir: a relay that cannot
+        // serve the file must not advertise it (scan matcher auto-repairs).
+        engine.startAdvertising(broadcast)
+
+        verify(exactly = 0) { blePeripheralService.startAdvertising(any(), any()) }
     }
 
     // ------------------------------------------------------------------

@@ -8,19 +8,26 @@
         tools:targetApi="s" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
-    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
-    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Coarse location only, and only on API <= 30: Android 8-11 requires a
+         location permission to perform BLE scans, even though the app never
+         determines or records position (neverForLocation). Not requested on
+         API 31+ where BLUETOOTH_SCAN with neverForLocation suffices. -->
+    <uses-permission
+        android:name="android.permission.ACCESS_COARSE_LOCATION"
+        android:maxSdkVersion="30" />
+    <!-- Strip INTERNET re-added by bundled support libraries (AndroidX
+         profileinstaller, ML Kit telemetry transport): app code opens no
+         network connections. Re-add only if a future feature genuinely
+         needs network access (ads, crash reporting). -->
+    <uses-permission
+        android:name="android.permission.INTERNET"
+        tools:node="remove" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <permission
         android:name="com.pyramidrelay.permission.BLE_SCAN_RESULT"

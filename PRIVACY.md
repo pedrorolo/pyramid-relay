@@ -1,6 +1,6 @@
 # Privacy Policy — Pyramid Relay
 
-**Last updated:** 2026-09-07
+**Last updated:** 2026-09-08
 
 Pyramid Relay is an offline-first, Bluetooth Low Energy (BLE) peer-to-peer file-sharing
 app for Android. This policy explains what data the app handles, where it lives, and how
@@ -123,17 +123,24 @@ the internet.
 ### Permissions the app uses
 
 - **Bluetooth (scan / connect / advertise):** required to find peers and transfer files.
-- **Location (fine/coarse):** Android requires location permission for BLE scanning on
-  older versions. Pyramid Relay requests it with `neverForLocation`, meaning it does not
-  use Bluetooth scans to determine or record your location.
+- **Location (approximate, Android 8–11 only):** the app never determines or records
+  your position. On Android 12+ no location permission is requested (`BLUETOOTH_SCAN`
+  with `neverForLocation` suffices). On Android 8–11 the OS refuses Bluetooth scans
+  without an approximate-location permission, so `ACCESS_COARSE_LOCATION`
+  (`maxSdkVersion=30`) is requested there solely to unlock scanning.
 - **Camera:** used **only** to scan QR codes locally for subscribing. Images are processed
   on-device and are not stored or uploaded.
 - **Notifications / wake lock / foreground service:** used to keep transfers alive and
   show progress.
-- **Internet:** declared in the manifest but **not used by the app to send or receive file
-  data** in the current version. On Play-distributed builds, Google Play Services may use
-  the internet connection to upload Android Vitals crash/ANR diagnostics (see Section 7).
-  In-app advertising, if added later (Section 6), would also use it.
+- **Internet:** the app's own manifest declares **no** `INTERNET` permission and the
+  app opens no network connections itself — file transfers are Bluetooth-only. (The
+  merged APK still lists `INTERNET` because bundled support libraries contribute it:
+  AndroidX profileinstaller and ML Kit's telemetry transport. No Firebase backend is
+  configured, so that transport has nowhere to send anything.) On Play-distributed
+  builds, Google Play Services itself (not this app) may use its own connection to
+  upload Android Vitals crash/ANR diagnostics (see Section 7). In-app advertising, if
+  added later (Section 6), would require network access and this policy would be
+  updated first.
 
 ---
 
@@ -215,6 +222,9 @@ information at all, no such data is processed regardless of age.
 
 - **Stop sharing:** deleting a broadcast or subscription immediately stops advertising and
   removes the associated local data.
+- **Block content:** every subscription offers Report and Block actions. Blocking deletes
+  local files immediately, stops relaying, and ensures the file is never fetched or
+  forwarded again (see EULA §3).
 - **Remove all data:** uninstalling the app deletes its app-private storage, database, and
   keys.
 - **Limit data use:** you can limit advertising data (e.g. resetting/limiting the
@@ -224,7 +234,20 @@ information at all, no such data is processed regardless of age.
 
 ---
 
-## 10. Changes to this policy
+## 10. Data retention
+
+- Broadcast files, received files, metadata, and RSA private keys are kept on your
+  device until you delete the corresponding broadcast/subscription.
+- Deleting a broadcast or subscription immediately stops advertising it and removes
+  its local files, database rows, and (for originators) its Keystore key.
+- Uninstalling the app removes all app-private storage, the database, and all keys.
+  Android Auto-Backup copies (see Section 3) follow your device backup's own
+  retention.
+- The developer retains no user data because none is ever collected (Section 5).
+
+---
+
+## 11. Changes to this policy
 
 We will update this policy if our data practices change — in particular before enabling
 advertising (Section 6) or adding a developer-run crash reporter (Section 7b). The "Last
@@ -232,10 +255,10 @@ updated" date at the top reflects the most recent revision.
 
 ---
 
-## 11. Contact
+## 12. Contact
 
-For questions about this privacy policy, please open an issue on the project repository or
-contact the maintainer through the project's GitHub page.
+For questions about this privacy policy or to report abuse, please open an issue at
+https://github.com/pedrorolo/pyramid-relay/issues.
 
 *Pyramid Relay is provided as-is, as an offline peer-to-peer tool. You are responsible for
 the content you choose to share and relay.*

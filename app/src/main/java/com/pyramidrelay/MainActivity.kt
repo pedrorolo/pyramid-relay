@@ -21,7 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.filled.BroadcastOnHome
-import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -56,23 +56,31 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val TAG = "MainActivity"
         private val REQUIRED_PERMISSION_NAMES = mapOf(
-            Manifest.permission.ACCESS_FINE_LOCATION to "Location",
+            Manifest.permission.ACCESS_COARSE_LOCATION to "Location (approximate, Android 8–11 only, for Bluetooth scanning)",
             Manifest.permission.BLUETOOTH_SCAN to "Bluetooth Scan",
             Manifest.permission.BLUETOOTH_CONNECT to "Bluetooth Connect",
             Manifest.permission.BLUETOOTH_ADVERTISE to "Bluetooth Advertise",
-            Manifest.permission.POST_NOTIFICATIONS to "Notifications",
-            Manifest.permission.NEARBY_WIFI_DEVICES to "Nearby WiFi Devices"
+            Manifest.permission.POST_NOTIFICATIONS to "Notifications"
         )
     }
 
     private var showMissingPermsDialog = mutableStateOf(false)
     private var missingPermsMessage = mutableStateOf("")
+    private var showDisclosureDialog = mutableStateOf(false)
     private var batteryOptimizationRequestLaunched = false
     private val activeIntent = mutableStateOf<Intent?>(null)
 
     private val requiredPermissions: Array<String>
         get() {
-            val perms = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION)
+            // Location is NOT a feature: the app never determines or records
+            // position. It is requested only on API <= 30, where Android 8-11
+            // refuses BLE scans without a location permission. On API 31+,
+            // BLUETOOTH_SCAN with neverForLocation suffices, so no location
+            // permission is requested at all.
+            val perms = mutableListOf<String>()
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                perms.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 perms.add(Manifest.permission.BLUETOOTH_SCAN)
                 perms.add(Manifest.permission.BLUETOOTH_CONNECT)
@@ -80,7 +88,6 @@ class MainActivity : ComponentActivity() {
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 perms.add(Manifest.permission.POST_NOTIFICATIONS)
-                perms.add(Manifest.permission.NEARBY_WIFI_DEVICES)
             }
             return perms.toTypedArray()
         }
@@ -111,6 +118,50 @@ class MainActivity : ComponentActivity() {
         requestPermissionsAndStart()
         setContent {
             P2PBroadcasterTheme {
+                if (showDisclosureDialog.value) {
+                    AlertDialog(
+                        onDismissRequest = { finishAffinity() },
+                        title = { Text("How Pyramid Relay uses your data") },
+                        text = {
+                            Text(
+                                "Pyramid Relay shares files directly between nearby " +
+                                    "devices over Bluetooth Low Energy — no servers, no " +
+                                    "uploads.\n\n" +
+                                    "• Bluetooth scan / advertise / connect: to find " +
+                                    "nearby peers and transfer files you broadcast or " +
+                                    "subscribe to, including in the background while " +
+                                    "the foreground notification is shown.\n" +
+                                    "• Approximate location (Android 8–11 only): " +
+                                    "required by the OS for Bluetooth scanning on " +
+                                    "those versions. Never requested on Android 12+, " +
+                                    "and never used to determine your position.\n" +
+                                    "• Camera: only to scan QR subscribe codes, " +
+                                    "on-device.\n" +
+                                    "• Notifications: to keep transfers running and " +
+                                    "show progress.\n\n" +
+                                    "Nearby devices can see a short beacon announcing " +
+                                    "which files this device has or wants (file ID, " +
+                                    "version, device ID) — but never file contents. " +
+                                    "You stay in control: deleting a broadcast or " +
+                                    "subscription stops advertising it."
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                SettingsStore(this@MainActivity).dataDisclosureAccepted = true
+                                showDisclosureDialog.value = false
+                                requestPermissionsAndStart()
+                            }) {
+                                Text("Accept and continue")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { finishAffinity() }) {
+                                Text("Decline and exit")
+                            }
+                        }
+                    )
+                }
                 if (showMissingPermsDialog.value) {
                     AlertDialog(
                         onDismissRequest = { finishAffinity() },
@@ -134,6 +185,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestPermissionsAndStart() {
+        // Prominent disclosure must precede any runtime permission request.
+        if (!SettingsStore(this).dataDisclosureAccepted) {
+            showDisclosureDialog.value = true
+            return
+        }
         val missing = requiredPermissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
@@ -146,16 +202,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startSyncService() {
-        val settingsStore = SettingsStore(this)
         val intent = Intent(this, BleForegroundService::class.java)
         try {
-            if (settingsStore.showPersistentNotification) {
-                ContextCompat.startForegroundService(this, intent)
-            } else {
-                // Setting off: start as a regular service so it still attempts to run
-                // in the background, but without a persistent notification.
-                startService(intent)
-            }
+            // Always a foreground service: background relay is the core feature
+            // and Play foreground-service policy requires user-perceptible work.
+            ContextCompat.startForegroundService(this, intent)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start BLE service", e)
             EventLog.log("app", "Failed to start BLE service: ${e.message}")
@@ -175,18 +226,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openBatteryOptimizationSettings() {
+        // Guidance-only flow: send the user to the system battery-optimization
+        // settings list so they can exempt the app themselves. We deliberately
+        // do NOT fire ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS (restricted
+        // under Play Device and Network Abuse policy).
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             try {
-                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                    data = Uri.parse("package:$packageName")
-                }
-                startActivity(intent)
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
             } catch (e: Exception) {
-                try {
-                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-                } catch (e2: Exception) {
-                    Log.e(TAG, "Failed to open battery optimization settings", e2)
-                }
+                Log.e(TAG, "Failed to open battery optimization settings", e)
             }
         }
     }
@@ -260,7 +308,8 @@ fun MainScreen(intentState: State<Intent?>? = null) {
                             popUpTo("log")
                         }
                     },
-                    icon = { Icon(Icons.Default.Menu, contentDescription = "Settings") }
+                    icon = { Icon(Icons.Default.Description, contentDescription = "Docs") },
+                    label = { Text("Docs", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center) }
                 )
             }
         }

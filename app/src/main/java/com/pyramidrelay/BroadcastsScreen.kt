@@ -229,6 +229,25 @@ fun BroadcastsScreen(
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
     var showRelayNameDialog by remember { mutableStateOf(false) }
     var showSizeError by remember { mutableStateOf(false) }
+    var showTerms by remember { mutableStateOf(false) }
+    var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val store = remember { SettingsStore(context) }
+    // UGC terms gate: users must accept the terms before broadcasting.
+    fun runGated(action: () -> Unit) {
+        if (store.termsAccepted) action()
+        else { pendingAction = action; showTerms = true }
+    }
+    if (showTerms) {
+        TermsGateDialog(
+            onAccept = {
+                store.termsAccepted = true
+                showTerms = false
+                pendingAction?.invoke()
+                pendingAction = null
+            },
+            onDecline = { showTerms = false; pendingAction = null }
+        )
+    }
     val pickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
             val cursor = context.contentResolver.query(uri, null, null, null, null)
@@ -269,7 +288,7 @@ fun BroadcastsScreen(
 
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(onClick = { pickLauncher.launch(arrayOf("*/*")) }) {
+            FloatingActionButton(onClick = { runGated { pickLauncher.launch(arrayOf("*/*")) } }) {
                 Icon(Icons.Default.Add, contentDescription = "Broadcast")
             }
         }
@@ -409,9 +428,11 @@ fun BroadcastsScreen(
             text = { Text("Replace \"${broadcast.fileName}\" with a new file? This will increment the version to v${broadcast.version + 1}.") },
             confirmButton = {
                 TextButton(onClick = {
-                    showUpdateConfirm = null
-                    updateTarget = broadcast
-                    updateLauncher.launch(arrayOf("*/*"))
+                    runGated {
+                        showUpdateConfirm = null
+                        updateTarget = broadcast
+                        updateLauncher.launch(arrayOf("*/*"))
+                    }
                 }) { Text("Update") }
             },
             dismissButton = { TextButton(onClick = { showUpdateConfirm = null }) { Text("Cancel") } }

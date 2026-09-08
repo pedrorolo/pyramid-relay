@@ -22,7 +22,6 @@ class BleForegroundService : Service() {
 
     private var syncEngine: SyncEngine? = null
     private var wakeLock: PowerManager.WakeLock? = null
-    private var persistentNotification: Boolean = true
     private var checkerRunning: Boolean = false
     private val notificationService by lazy { NotificationService(this) }
     private val notificationManager by lazy { getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager }
@@ -42,20 +41,17 @@ class BleForegroundService : Service() {
         val app = application as PyramidRelayApp
         syncEngine = app.syncEngine
         app.bleForegroundService = this
-        persistentNotification = app.settingsStore.showPersistentNotification
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "com.pyramidrelay:ble").apply {
             setReferenceCounted(false)
             acquire()
         }
-        // Only become a foreground service (and post the persistent notification)
-        // when the user has enabled it. Otherwise run as a normal service with no
-        // notification, which may be killed by the system (see Settings warning).
-        if (persistentNotification) {
-            rePostNotification()
-            handler.post(notificationChecker)
-            checkerRunning = true
-        }
+        // Always a foreground service with a persistent notification: background
+        // relay is the core feature (Play foreground-service policy requires
+        // user-perceptible work; there is no "run silently" mode).
+        rePostNotification()
+        handler.post(notificationChecker)
+        checkerRunning = true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -76,7 +72,7 @@ class BleForegroundService : Service() {
         checkerRunning = false
         wakeLock?.let { if (it.isHeld) it.release() }
         syncEngine?.stop()
-        (application as PyramidRelayApp).bleForegroundService = null
+        (application as? PyramidRelayApp)?.bleForegroundService = null
         super.onDestroy()
         Log.d(TAG, "BLE foreground service stopped")
     }
@@ -88,32 +84,11 @@ class BleForegroundService : Service() {
 
     private fun rePostNotification() {
         try {
-            notificationService.createForegroundNotification(persistentNotification)?.let {
+            notificationService.createForegroundNotification()?.let {
                 startForeground(NOTIFICATION_ID, it, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to re-post foreground notification", e)
-        }
-    }
-
-    /**
-     * Applies a runtime change to the persistent-notification setting.
-     * When enabled, promotes the service to foreground and keeps the notification
-     * alive. When disabled, removes the notification and demotes the service to a
-     * normal (non-foreground) service so no notification is shown.
-     */
-    fun applyPersistentNotification(enabled: Boolean) {
-        persistentNotification = enabled
-        if (enabled) {
-            rePostNotification()
-            if (!checkerRunning) {
-                handler.post(notificationChecker)
-                checkerRunning = true
-            }
-        } else {
-            handler.removeCallbacks(notificationChecker)
-            checkerRunning = false
-            stopForeground(Service.STOP_FOREGROUND_REMOVE)
         }
     }
 }

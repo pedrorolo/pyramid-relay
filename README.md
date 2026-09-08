@@ -32,6 +32,11 @@ without any network infrastructure.
   others who arrive later.
 - Families or communities in remote, disconnected locations use Pyramid Relay as local file
   infrastructure — sharing documents, updates, and media directly between devices.
+- In catastrophe or emergency situations where internet and cellular networks are
+  unavailable, Pyramid Relay can relay critical files (maps, instructions, medical
+  information) across a mesh of nearby devices — no infrastructure required.
+  Delivery is best-effort only: it needs charged devices with Bluetooth on,
+  within range of each other. There is no guaranteed delivery.
 
 ## Features
 

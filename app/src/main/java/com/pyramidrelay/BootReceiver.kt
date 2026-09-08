@@ -12,22 +12,17 @@ class BootReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
-        Log.d(TAG, "Boot completed, starting BLE service and app UI")
-        EventLog.log("app", "Device booted — starting Pyramid Relay service and UI")
+        // NOTE: QUICKBOOT_POWERON is not an SDK constant (some OEMs broadcast
+        // the raw "android.intent.action.QUICKBOOT_POWERON" string instead).
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED &&
+            intent.action != "android.intent.action.QUICKBOOT_POWERON") return
+        // Restart only the relay service after boot. Never launch the UI from
+        // the background (background activity-start restriction). The service
+        // always runs as a user-perceptible foreground service.
+        Log.d(TAG, "Boot completed, starting BLE relay service")
+        EventLog.log("app", "Device booted — starting Pyramid Relay relay service")
         try {
-            val serviceIntent = Intent(context, BleForegroundService::class.java)
-            if (SettingsStore(context).showPersistentNotification) {
-                ContextCompat.startForegroundService(context, serviceIntent)
-            } else {
-                // Setting off: attempt to run as a regular service (no notification),
-                // accepting that the system may kill it in the background.
-                context.startService(serviceIntent)
-            }
-            val mainIntent = Intent(context, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(mainIntent)
+            ContextCompat.startForegroundService(context, Intent(context, BleForegroundService::class.java))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start on boot", e)
             EventLog.log("app", "Failed to start on boot: ${e.message}")

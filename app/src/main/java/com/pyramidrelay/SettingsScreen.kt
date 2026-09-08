@@ -13,7 +13,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,8 +29,6 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun SettingsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val app = context.applicationContext as PyramidRelayApp
-    var showPersistentNotification by remember { mutableStateOf(app.settingsStore.showPersistentNotification) }
     var showLicenses by remember { mutableStateOf(false) }
     var showEula by remember { mutableStateOf(false) }
     var showPrivacy by remember { mutableStateOf(false) }
@@ -75,40 +72,8 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
         Text(
-            text = "Settings",
-            style = MaterialTheme.typography.titleMedium
-        )
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Switch(
-                checked = showPersistentNotification,
-                onCheckedChange = { newValue ->
-                    showPersistentNotification = newValue
-                    app.settingsStore.showPersistentNotification = newValue
-                    app.bleForegroundService?.applyPersistentNotification(newValue)
-                }
-            )
-            Text(
-                text = "Show persistent notification",
-                style = MaterialTheme.typography.bodyMedium
-            )
-            if (!showPersistentNotification) {
-                Text(
-                    text = "Warning: Disabling this may cause the app to stop working properly. " +
-                        "Android requires a visible notification for background services. " +
-                        "The app may be killed by the system without it.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            }
-        }
-        Text(
             text = "Documentation",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(top = 16.dp)
+            style = MaterialTheme.typography.titleMedium
         )
         Row(
             modifier = Modifier

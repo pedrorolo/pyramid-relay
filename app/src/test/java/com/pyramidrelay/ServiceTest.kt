@@ -113,8 +113,8 @@ class ServiceTest {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val service = BleCentralService(context)
         var received = false
-        service.onDeviceDiscovered = { _, _, _ -> received = true }
-        service.onDeviceDiscovered?.invoke("AA:BB:CC", ByteArray(14), null)
+        service.onDeviceDiscovered = { _, _, _, _ -> received = true }
+        service.onDeviceDiscovered?.invoke("AA:BB:CC", ByteArray(14), null, false)
         assertTrue(received)
     }
 

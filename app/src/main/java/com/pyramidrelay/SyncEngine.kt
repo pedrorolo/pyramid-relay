@@ -522,6 +522,10 @@ class SyncEngine(
      * Returns true iff the advertisement was recognized and the receive pipeline
      * completed successfully (meta verified AND transfer accepted).
      */
+    /** UGC moderation: user-blocked file IDs are never fetched, pushed, or relayed. */
+    private fun isBlocked(fileId: String): Boolean =
+        SettingsStore(context).isBlocked(fileId)
+
     internal suspend fun handleDiscoveredDevice(deviceAddress: String, serviceData: ByteArray, advMeta: BleMetaPayload?, isWant: Boolean = false): Boolean {
         if (isWant) {
             return handleWantAdvertisement(deviceAddress, serviceData, advMeta)
@@ -558,6 +562,10 @@ class SyncEngine(
         val broadcasts = broadcastDao.getAll()
         val selfMatch = broadcasts.firstOrNull { b -> cryptoService.fileIdHash(b.fileId).contentEquals(fileIdHash) }
         if (selfMatch != null) {
+            if (isBlocked(selfMatch.fileId)) {
+                EventLog.log("scan", "Advertisement for blocked file ${selfMatch.fileId.takeLast(8)} - ignored")
+                return false
+            }
             val isSameKey = cryptoService.keyId(selfMatch.publicKey).contentEquals(keyId)
             if (isSameKey) {
                 if (version <= selfMatch.version) {
@@ -603,6 +611,10 @@ class SyncEngine(
             cryptoService.fileIdHash(s.fileId).contentEquals(fileIdHash) && cryptoService.keyId(s.publicKey).contentEquals(keyId)
         }
         if (subscription != null) {
+            if (isBlocked(subscription.fileId)) {
+                EventLog.log("scan", "Advertisement for blocked file ${subscription.fileId.takeLast(8)} - ignored")
+                return false
+            }
             val localVer = subscription.localVersion
             if (localVer != null && version <= localVer) {
                 EventLog.log("scan", "\"${subscription.fileName ?: subscription.fileId}\" already at v$localVer - adv v$version not newer, skipped")
@@ -641,6 +653,10 @@ class SyncEngine(
         val broadcasts = broadcastDao.getAll()
         val broadcast = broadcasts.firstOrNull { b -> cryptoService.fileIdHash(b.fileId).contentEquals(fileIdHash) }
         if (broadcast == null) { EventLog.log("scan", "WANT adv hash=$hashHex - we do not have this file, ignored"); return false }
+        if (isBlocked(broadcast.fileId)) {
+            EventLog.log("scan", "WANT adv for blocked file ${broadcast.fileId.takeLast(8)} - will not push")
+            return false
+        }
         if (!cryptoService.keyId(broadcast.publicKey).contentEquals(keyId)) {
             EventLog.log("scan", "WANT adv hash=$hashHex - key mismatch, ignored")
             return false
@@ -710,6 +726,10 @@ class SyncEngine(
      */
     private fun handleIncomingFile(address: String, fileIdBytes: ByteArray, version: Int, keyId: ByteArray, size: Long, fileHash: ByteArray, fileName: String, tempFile: java.io.File): Boolean {
         val fileId = uuidToString(fileIdBytes)
+        if (isBlocked(fileId)) {
+            EventLog.log("sync", "Incoming push for blocked file ${fileId.takeLast(8)} - discarding")
+            tempFile.delete(); return false
+        }
         val hashHex = fileHash.joinToString("") { "%02x".format(it) }
         try {
             val subscriptions = runBlocking { subscriptionDao.getAll() }

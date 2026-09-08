@@ -60,17 +60,10 @@ class BleCentralService(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun startScan() {
         stopScan()
-        // When the persistent notification is enabled the app runs as a foreground
-        // service and the process stays alive, so a live ScanCallback is fine.
-        // When it is disabled the service runs as a regular (non-foreground)
-        // service that the system may kill; a PendingIntent scan lets the OS hold
-        // the scan and wake the app on a match, so scanning survives screen-off
-        // and process death without a foreground notification.
-        if (SettingsStore(context).showPersistentNotification) {
-            startLiveScan()
-        } else {
-            startPendingIntentScan()
-        }
+        // The service always runs in the foreground with a persistent
+        // notification, so a live ScanCallback is used. (The PendingIntent
+        // scan path below is retained as an unused fallback.)
+        startLiveScan()
     }
 
     @SuppressLint("MissingPermission")

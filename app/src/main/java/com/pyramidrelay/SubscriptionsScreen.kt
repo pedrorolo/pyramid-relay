@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.QrCode
@@ -184,13 +185,40 @@ fun SubscriptionsScreen(
     var showPasteDialog by remember { mutableStateOf(false) }
     var showQrScan by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf<SubscriptionEntity?>(null) }
+    var showReportFor by remember { mutableStateOf<SubscriptionEntity?>(null) }
+    var showTerms by remember { mutableStateOf(false) }
+    var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val store = remember { SettingsStore(context) }
+
+    // UGC terms gate + block-list enforcement for every new subscription.
+    fun subscribe(fileId: String, pk: String, relayName: String?, fileName: String?) {
+        if (store.isBlocked(fileId)) {
+            EventLog.log("sub", "Subscription to blocked file ${fileId.takeLast(8)} refused")
+            return
+        }
+        val action = { viewModel.addSubscription(fileId, pk, relayName, fileName) }
+        if (store.termsAccepted) action()
+        else { pendingAction = action; showTerms = true }
+    }
 
     if (initialFileId != null && initialPk != null) {
         var added by remember { mutableStateOf(false) }
         if (!added) {
-            viewModel.addSubscription(initialFileId, initialPk, initialRelayName, initialFileName)
+            subscribe(initialFileId, initialPk, initialRelayName, initialFileName)
             added = true
         }
+    }
+
+    if (showTerms) {
+        TermsGateDialog(
+            onAccept = {
+                store.termsAccepted = true
+                showTerms = false
+                pendingAction?.invoke()
+                pendingAction = null
+            },
+            onDecline = { showTerms = false; pendingAction = null }
+        )
     }
 
     Scaffold { padding ->
@@ -214,7 +242,8 @@ fun SubscriptionsScreen(
                             isStreaming = activeStreamingFileIds.contains(subscription.fileId),
                             isAdvertising = currentAdvertisingFileId == subscription.fileId,
                             progress = if (activeStreamingFileIds.contains(subscription.fileId)) streamingProgress[subscription.fileId] ?: 0f else downloadProgress[subscription.fileId] ?: 0f,
-                            onDelete = { showDeleteConfirm = subscription }
+                            onDelete = { showDeleteConfirm = subscription },
+                            onModerate = { showReportFor = subscription }
                         )
                     }
                 }
@@ -238,7 +267,7 @@ fun SubscriptionsScreen(
         PasteLinkDialog(
             onDismiss = { showPasteDialog = false },
             onConfirm = { fileId, pk, relayName, fileName ->
-                viewModel.addSubscription(fileId, pk, relayName, fileName)
+                subscribe(fileId, pk, relayName, fileName)
                 showPasteDialog = false
             }
         )
@@ -247,9 +276,24 @@ fun SubscriptionsScreen(
         QrScanDialog(
             onDismiss = { showQrScan = false },
             onScanned = { fileId, pk, relayName, fileName ->
-                viewModel.addSubscription(fileId, pk, relayName, fileName)
+                subscribe(fileId, pk, relayName, fileName)
                 showQrScan = false
             }
+        )
+    }
+    showReportFor?.let { subscription ->
+        val name = subscription.relayName?.takeIf { it.isNotBlank() }
+            ?: subscription.fileName ?: subscription.fileId.takeLast(8)
+        ReportBlockDialog(
+            displayName = name,
+            fileId = subscription.fileId,
+            onBlock = {
+                store.blockFile(subscription.fileId)
+                EventLog.log("sub", "Blocked file ${subscription.fileId.takeLast(8)} - deleted, never fetched or relayed again")
+                viewModel.deleteSubscription(subscription)
+                showReportFor = null
+            },
+            onDismiss = { showReportFor = null }
         )
     }
 
@@ -276,7 +320,8 @@ fun SubscriptionRow(
     isStreaming: Boolean = false,
     isAdvertising: Boolean = false,
     progress: Float = 0f,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onModerate: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as PyramidRelayApp
@@ -445,6 +490,13 @@ fun SubscriptionRow(
                         Icon(
                             Icons.Default.Delete,
                             contentDescription = "Delete",
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    IconButton(onClick = onModerate, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            Icons.Default.Flag,
+                            contentDescription = "Report or block",
                             modifier = Modifier.size(20.dp)
                         )
                     }

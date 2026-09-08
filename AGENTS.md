@@ -28,13 +28,15 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 
 ## Key Constraints
 
-- **compileSdk 35, minSdk 26, targetSdk 35**
+- **compileSdk 36, minSdk 26, targetSdk 36**
 - **Java 17** required (jvmToolchain)
 - Unit tests use Robolectric + MockK
 - `testOptions { unitTests.isReturnDefaultValues = true }` — Android framework methods return defaults in tests
-- BLE operations require `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `BLUETOOTH_ADVERTISE` permissions (Android 12+)
-- Foreground service with partial wake lock required to keep BLE alive with screen off
-- **Battery optimization**: App checks at startup and prompts user to disable battery optimization for reliable transfers
+- BLE operations require `BLUETOOTH_SCAN` (with `neverForLocation`), `BLUETOOTH_CONNECT`, `BLUETOOTH_ADVERTISE` permissions (Android 12+); `ACCESS_COARSE_LOCATION` (`maxSdkVersion=30`) only on Android 8–11 where the OS requires it for BLE scans — never used for position
+- No `INTERNET` permission: not declared by the app and stripped from the merged manifest via `tools:node="remove"` (libraries re-add it). Do not re-add without a genuine network feature.
+- Foreground service (`connectedDevice`) with partial wake lock required to keep BLE alive with screen off — always on, no user toggle (Play FGS policy)
+- **Battery optimization**: App checks at startup and opens the system battery-optimization settings list (guidance only). Never fire `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` — restricted by Play policy; the permission is intentionally undeclared
+- **UGC moderation**: users accept community terms (EULA §3) before first broadcast/subscribe; subscriptions have Report/Block actions; `SettingsStore.blockedFileIds` are never fetched, pushed, or relayed (enforced in `SyncEngine`); reports go to the GitHub issue tracker
 
 ## Transfer Limits
 
@@ -53,7 +55,7 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 
 - `app/src/main/java/com/pyramidrelay/` — all source code (flat, no subdirectories for services)
 - `app/src/test/java/com/pyramidrelay/` — unit tests
-- `docs/specifications.md` — detailed spec (278 lines)
+- `docs/play-console.md` — Play Console submission prep (Data Safety, FGS declaration, video script)
 
 ## Key Components
 
@@ -64,7 +66,7 @@ Android-only P2P file-sharing app. Kotlin, Jetpack Compose, BLE GATT for file tr
 - **SubscriptionsViewModel**: Manages subscriptions; downloads trigger relay (Role.RELAY)
 - **CryptoService**: Generates RSA keys and handles the hybrid encrypted payload envelope.
 - **NotificationService**: Shows foreground notification for relaying and update notifications for file transfers.
-- **BootReceiver**: Restarts the BLE foreground service on device boot.
+- **BootReceiver**: Restarts the BLE foreground service on device boot (service only — never launches UI from background).
 
 ## Progress Tracking
 

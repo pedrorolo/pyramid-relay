@@ -39,12 +39,12 @@ class CongestionPauseTest {
     }
 
     @Test
-    fun `second record doubles the backoff`() {
+    fun `second record scales the backoff by the multiplier`() {
         val pause = CongestionPause(deviceAddress, basePauseMs)
         pause.record()
         val firstBackoff = pause.currentBackoff
         pause.record()
-        assertEquals(firstBackoff * 2, pause.currentBackoff)
+        assertEquals((firstBackoff * CongestionPauses.MULTIPLIER).toLong(), pause.currentBackoff)
     }
 
     @Test
@@ -54,16 +54,16 @@ class CongestionPauseTest {
         assertEquals(20_000L, pause.currentBackoff)
 
         pause.record()
-        assertEquals(40_000L, pause.currentBackoff)
+        assertEquals(30_000L, pause.currentBackoff)
 
         pause.record()
-        assertEquals(80_000L, pause.currentBackoff)
+        assertEquals(45_000L, pause.currentBackoff)
 
         pause.record()
-        assertEquals(160_000L, pause.currentBackoff)
+        assertEquals(67_500L, pause.currentBackoff)
 
         pause.record()
-        assertEquals(320_000L, pause.currentBackoff)
+        assertEquals(101_250L, pause.currentBackoff)
     }
 
     @Test
@@ -73,13 +73,13 @@ class CongestionPauseTest {
         // First record uses base pause (isFirstRecord=true), so backoff stays at 100_000L
         assertEquals(100_000L, pause.currentBackoff)
         pause.record()
-        assertEquals(200_000L, pause.currentBackoff)
+        assertEquals(150_000L, pause.currentBackoff)
         pause.record()
-        assertEquals(400_000L, pause.currentBackoff)
+        assertEquals(225_000L, pause.currentBackoff)
         pause.record()
-        assertEquals(600_000L, pause.currentBackoff) // capped at MAX_PAUSE_MS
+        assertEquals(300_000L, pause.currentBackoff) // capped at MAX_PAUSE_MS
         pause.record()
-        assertEquals(600_000L, pause.currentBackoff) // stays at cap
+        assertEquals(300_000L, pause.currentBackoff) // stays at cap
     }
 
     @Test
@@ -121,7 +121,7 @@ class CongestionPauseTest {
         pause.record()
         pause.record()
         pause.record()
-        assertEquals(80_000L, pause.currentBackoff)
+        assertEquals(45_000L, pause.currentBackoff)
 
         // Simulate a long gap by setting lastCongestionTime to the past
         pause.lastCongestionTime = System.currentTimeMillis() - CongestionPauses.MAX_PAUSE_MS - 1
@@ -135,11 +135,11 @@ class CongestionPauseTest {
         val pause = CongestionPause(deviceAddress, basePauseMs)
         pause.record()
         pause.record()
-        assertEquals(40_000L, pause.currentBackoff)
+        assertEquals(30_000L, pause.currentBackoff)
 
         // Record again within MAX_PAUSE_MS
         pause.record()
-        assertEquals(80_000L, pause.currentBackoff)
+        assertEquals(45_000L, pause.currentBackoff)
     }
 
     @Test
@@ -293,8 +293,8 @@ class CongestionPausesTest {
 
     @Test
     fun `constants have expected values`() {
-        assertEquals(600_000L, CongestionPauses.MAX_PAUSE_MS)
-        assertEquals(2L, CongestionPauses.MULTIPLIER)
+        assertEquals(300_000L, CongestionPauses.MAX_PAUSE_MS)
+        assertEquals(1.5, CongestionPauses.MULTIPLIER, 0.0)
         assertEquals(1_000L, CongestionPauses.ROTATION_INTERVAL_MS)
     }
 }

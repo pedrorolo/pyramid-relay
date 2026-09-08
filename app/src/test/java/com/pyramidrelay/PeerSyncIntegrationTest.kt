@@ -55,8 +55,8 @@ class PeerSyncIntegrationTest {
         blePeripheralA = mockk(relaxed = true)
         bleCentralB = mockk(relaxed = true)
         blePeripheralB = mockk(relaxed = true)
-        every { blePeripheralA.startAdvertising(any(), any()) } answers { advertisementsA[firstArg()] = secondArg() }
-        every { blePeripheralB.startAdvertising(any(), any()) } answers { advertisementsB[firstArg()] = secondArg() }
+        every { blePeripheralA.startAdvertising(any(), any()) } answers { advertisementsA[firstArg<String>()] = secondArg(); true }
+        every { blePeripheralB.startAdvertising(any(), any()) } answers { advertisementsB[firstArg<String>()] = secondArg(); true }
         every { blePeripheralA.getDeviceUuidBytes() } returns ByteArray(16)
         every { blePeripheralB.getDeviceUuidBytes() } returns ByteArray(16)
         broadcastDaoA = mockk(relaxed = true)
@@ -105,12 +105,17 @@ class PeerSyncIntegrationTest {
 
     @Test
     fun `advertisement protocol preserves file hash version and key id`() = runBlocking {
-        val entity = publish("advertised".toByteArray()).first
+        val content = "advertised".toByteArray()
+        val entity = publish(content).first
         engineA.startAdvertising(entity)
         val parsed = BleMetaPayload.fromBytes(advertisementsA[entity.fileId]!!)!!
         assertEquals(entity.version, parsed.version)
-        assertEquals(entity.fileName, parsed.fileName)
+        // File names are never broadcast (privacy): receivers learn the name
+        // after connecting, via META or the push header.
+        assertEquals("", parsed.fileName)
         assertTrue(parsed.fileId.isNotEmpty())
+        assertArrayEquals(cryptoA.sha256(content), parsed.fileHash)
+        assertArrayEquals(cryptoA.keyId(entity.publicKey), parsed.keyId)
     }
 
     @Test
