@@ -50,13 +50,6 @@ Requires Android 8.0 or later on a physical device with Bluetooth Low Energy
 3. Launch the app, accept the data-use disclosure, and grant the Bluetooth
    and notification permissions.
 
-> **"App not installed"?** An Android app cannot be replaced by a copy signed
-> with a different key. If a debug or older build exists anywhere on the
-> device — including inside Secure Folder / work profiles, which don't show
-> in the main app list — uninstall every copy first, then install fresh.
-> Uninstalling deletes local broadcasts, subscriptions, and keys, so export
-> important files beforehand.
-
 ## Features
 
 - **Offline-first** — works without internet, even in crowded venues or remote areas
